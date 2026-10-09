@@ -1,0 +1,139 @@
+# The Orbit agent
+
+Orbit RMM's agent for Windows, macOS and Linux: one static Go binary, run by
+the system as a service, that reports a computer's health and inventory to
+Orbit MDM and runs the tasks Orbit RMM sends it.
+
+The server is the Orbit MDM repository (`Orbit-AI-LLC/Orbit-MDM`, the
+`Orbit MDM` folder beside this one): its `apps/rmm` is the agent's API, the
+signed tasks and the one-line installers, which download this repository's
+releases.
+
+## Install
+
+From the portal's **Enroll → Orbit agent**, copy the command for the
+platform. It downloads the build for the machine, checks its SHA-256 and runs:
+
+```sh
+orbit-agent install --server https://mdm.example.com --token orbe_…
+```
+
+which enrolls with the install token, keeps the agent's identity in its
+configuration (readable by root or SYSTEM only) and installs the service:
+
+| | Service | Binary | Configuration |
+| --- | --- | --- | --- |
+| Windows | `OrbitAgent` (automatic, restarted on failure) | `C:\Program Files\Orbit\Agent\orbit-agent.exe` | `C:\ProgramData\Orbit\Agent\config.json` |
+| macOS | launch daemon `ai.orbit.agent` | `/Library/Orbit/orbit-agent` | `/Library/Application Support/Orbit Agent/config.json` |
+| Linux | systemd unit `orbit-agent` | `/usr/local/bin/orbit-agent` | `/etc/orbit-agent/config.json`, state in `/var/lib/orbit-agent` |
+
+`orbit-agent status`, `orbit-agent once` (check in and run what comes back)
+and `orbit-agent uninstall` do what they say. `ORBIT_AGENT_HOME` moves the
+configuration and state (for tests, and to run a second copy beside the
+service); `install --no-service` enrolls without copying the binary or
+installing the service.
+
+### Through an MDM
+
+Each release has packages for deploying the agent with an MDM (Intune, Jamf,
+Kandji, Orbit MDM's own app deployment) or a group policy. Both put the binary
+where `install` keeps it and run `orbit-agent install --package`: a computer
+that is already enrolled keeps its enrollment and starts the new version (an
+upgrade never enrolls again, so a single-use token isn't spent twice);
+otherwise it enrolls with the server and install token given, and with none
+it stays installed, unenrolled, and says so.
+
+- **Windows:** `Orbit-Agent-Windows-x64.msi` or `-arm64.msi`, per machine:
+
+  ```bat
+  msiexec /i Orbit-Agent-Windows-x64.msi SERVER=https://mdm.example.com TOKEN=orbe_… /qn
+  ```
+
+  or set `Server` and `Token` (strings) under
+  `HKLM\SOFTWARE\Policies\Orbit\Agent` and install it with no properties.
+  The token is kept out of the install log. Uninstalling it runs
+  `orbit-agent uninstall`; an upgrade stops the service, replaces the file and
+  starts it again.
+- **macOS:** `Orbit-Agent-macOS.pkg`, one universal binary. Give it the server
+  and token with a configuration profile's custom settings for the
+  `ai.orbit.agent` domain (keys `Server` and `Token`), installed before or with
+  the package; the postinstall log is `/var/log/orbit-agent-install.log`.
+  `scripts/package_agent_macos.sh` builds it from `dist`.
+
+## What it does
+
+Every check-in (default a minute) sends CPU, memory, every disk, uptime,
+whether a restart is pending and the state of the services the organization
+watches, and gets back tasks. While someone has the computer open in the
+portal, it waits on `/api/rmm/v1/wait` between check-ins so a command runs at
+once. Tasks run one after another on a worker, so a long patch install never
+holds up the check-ins.
+
+| Task | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| Script | PowerShell, Command Prompt, Python | zsh, bash, sh, Python | bash, sh, Python |
+| Inventory | CIM, the registry's uninstall keys, BitLocker, firewall, Defender | `system_profiler`, `fdesetup`, the application firewall, Gatekeeper | DMI, `/proc`, dpkg or rpm, LUKS, ufw/firewalld/nftables |
+| Patch scan / install | Windows Update's COM API, with MSRC severities | `softwareupdate` | apt (security pocket = important), dnf with `updateinfo`, zypper |
+| Software install | `.msi` (`msiexec /qn`), `.exe` with its silent switch | `.pkg` (`installer`) | `.deb` (apt), `.rpm` (dnf or zypper) |
+| Restart, shut down | `shutdown.exe`, a minute's notice | `shutdown`, a minute's notice | `shutdown`, a minute's notice |
+| Lock | a one-off task in the signed-in person's session | `pmset displaysleepnow` | `loginctl lock-sessions` |
+| Remote session | a terminal (ConPTY) or a VNC desktop | a terminal (PTY) or Screen Sharing | a terminal (PTY) or x11vnc |
+
+Scripts can run as the signed-in person instead of root on macOS
+(`launchctl asuser`) and Linux (`runuser`); on Windows they run as SYSTEM.
+Output is kept to 512 KB a stream, and a script that runs past its timeout is
+stopped with everything it started.
+
+## Remote sessions
+
+A `remote` task (`internal/remote/`) brings the agent to a live session an
+admin opened in the portal: it opens a WebSocket to the relay in Orbit MDM
+(Orbit MDM's `apps/rmm/remote.py`), authenticated with its own secret, and passes bytes
+between the far end and a local one. The session runs in the background, so
+check-ins and other tasks go on as usual, and ends when the relay closes it.
+
+- **Terminal:** a real pseudo-terminal running the computer's shell as
+  SYSTEM or root — colour, full-screen programs, tab completion and resizing,
+  not one command at a time. Windows uses ConPTY (`conhost`), macOS and Linux
+  a PTY with a login shell.
+- **Remote desktop:** the agent connects to the computer's VNC server and
+  relays its RFB stream to the admin's browser (noVNC), which speaks the
+  protocol and does any sign-in itself. On Windows and macOS it expects a
+  server already listening (Screen Sharing on a Mac; TightVNC, UltraVNC or
+  TigerVNC on Windows). On Linux it uses one if present, or starts `x11vnc`
+  for the session signed in at the screen, bound to localhost; whoever is at
+  the computer is told their screen is being viewed.
+
+## Why a task can be trusted
+
+Each task arrives as base64 bytes and an Ed25519 signature over exactly those
+bytes, made with the server's key. The agent pinned that key when it enrolled
+and checks, before anything runs, that the signature is good, the task names
+this agent, it hasn't expired, and it isn't one it has run before (task ids
+are recorded before a task starts, in `seen.json`). Someone who can change the
+traffic, or who has a copy of the server's database, still can't make a
+computer run anything. Downloads (software, agent updates) are checked against
+the SHA-256 in the signed task before they are opened.
+
+## Building
+
+```sh
+go vet ./... && go test ./...
+sh scripts/build_agent.sh       # every platform into dist, with SHA256SUMS and releases.json
+```
+
+`.github/workflows/agent.yml` builds and tests on every push and pull
+request, builds the `.pkg` (on macOS) and the `.msi` files (on Windows, with
+WiX), and a tag `agent-v<version>` publishes a release. With its secrets set
+(listed at the top of the workflow) the macOS binaries are signed with a
+Developer ID and the `.pkg` with a Developer ID Installer certificate and
+notarized; the Windows binaries and `.msi` files are Authenticode-signed.
+Without them everything is built unsigned, with a warning. `SHA256SUMS` and
+`releases.json` are written after signing (`build_agent.sh manifest`). Put the
+release's `releases.json` in the server's `ORBIT_RMM_AGENT_RELEASES` and its
+version in `ORBIT_RMM_AGENT_VERSION`; agents running an older version are sent
+an `update_agent` task and replace themselves.
+
+## Not yet
+
+Running scripts as the signed-in person on Windows.

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Orbit agent .pkg: the binary is in place; enroll it, or, when this computer
+# is already enrolled, start the new version (`orbit-agent install --package`:
+# the server and token come from the ai.orbit.agent managed preferences a
+# configuration profile sets). What it says goes to the install log.
+log=/var/log/orbit-agent-install.log
+/Library/Orbit/orbit-agent install --package >>"$log" 2>&1
+status=$?
+[ "$status" -eq 0 ] || echo "orbit-agent install --package failed ($status); see $log" >&2
+exit "$status"

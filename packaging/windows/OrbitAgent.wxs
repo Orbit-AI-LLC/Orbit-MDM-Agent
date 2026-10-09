@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Orbit agent for Windows as an .msi, for deploying through an MDM (Intune,
+  Orbit MDM's own app deployment) or a group policy:
+
+    msiexec /i Orbit-Agent-Windows-x64.msi SERVER=https://mdm.example.com TOKEN=orbe_… /qn
+
+  It puts orbit-agent.exe where `orbit-agent install` keeps it and runs its
+  install in package mode (agent/README.md): an enrolled computer
+  keeps its enrollment and runs the new version; otherwise it enrolls with
+  SERVER and TOKEN, or with the Server and Token values a policy set under
+  HKLM\SOFTWARE\Policies\Orbit\Agent. TOKEN never appears in the install log.
+  Removing it runs `orbit-agent uninstall`; an upgrade doesn't.
+
+  Built by the agent workflow with WiX: wix build, with the architecture
+  (x64 or arm64) and the Version and Binary variables.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Orbit Agent" Manufacturer="Orbit" Version="$(Version)" UpgradeCode="5BD46D18-45E3-4969-BF20-72E10D4F6487" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of the Orbit agent is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="SERVER" Secure="yes" />
+    <Property Id="TOKEN" Secure="yes" Hidden="yes" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="OrbitFolder" Name="Orbit">
+        <Directory Id="INSTALLFOLDER" Name="Agent">
+          <Component Id="Agent">
+            <File Id="OrbitAgentExe" Source="$(Binary)" Name="orbit-agent.exe" KeyPath="yes" />
+            <!-- The agent registers its own service (OrbitAgent); stop it before the file is replaced or removed. -->
+            <ServiceControl Id="StopOrbitAgent" Name="OrbitAgent" Stop="both" Wait="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main">
+      <ComponentRef Id="Agent" />
+    </Feature>
+
+    <CustomAction Id="EnrollAgent" FileRef="OrbitAgentExe" ExeCommand="install --package --server &quot;[SERVER]&quot; --token &quot;[TOKEN]&quot;"
+                  Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
+    <CustomAction Id="RemoveAgent" FileRef="OrbitAgentExe" ExeCommand="uninstall"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="EnrollAgent" Before="InstallFinalize" Condition="NOT REMOVE" />
+      <Custom Action="RemoveAgent" After="StopServices" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

@@ -1,0 +1,198 @@
+# Builds the Orbit agent for Windows, macOS and Linux on every push and
+# pull request, packages it for deploying through an MDM (Orbit-Agent-macOS.pkg,
+# Orbit-Agent-Windows-x64.msi and -arm64.msi), and publishes a release with
+# checksums for a tag agent-v<version>.
+#
+# Signing needs these repository secrets. Without them everything still builds
+# and publishes, unsigned, with a warning:
+#   MACOS_CERTIFICATE_P12, MACOS_CERTIFICATE_PASSWORD  a "Developer ID Application" .p12, base64: the macOS binaries
+#   MACOS_INSTALLER_P12, MACOS_INSTALLER_PASSWORD      a "Developer ID Installer" .p12, base64: the .pkg
+#   APPLE_TEAM_ID, NOTARY_APPLE_ID, NOTARY_PASSWORD     notarizing the .pkg (an app-specific password)
+#   WINDOWS_CERTIFICATE_PFX, WINDOWS_CERTIFICATE_PASSWORD  an Authenticode code-signing .pfx, base64: the .exe and .msi files
+# Signing changes the binaries, so SHA256SUMS and releases.json are written
+# last, over the signed files.
+name: Orbit agent
+
+on:
+  push:
+    branches: [main]
+    tags: ["agent-v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: go vet ./... && go test ./...
+      - id: version
+        name: Version
+        run: |
+          VERSION="$(cat VERSION)"
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then VERSION="${GITHUB_REF_NAME#agent-v}"; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: VERSION="${{ steps.version.outputs.version }}" sh scripts/build_agent.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-binaries
+          path: dist/orbit-agent-*
+
+  macos:
+    needs: build
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_INSTALLER_P12: ${{ secrets.MACOS_INSTALLER_P12 }}
+      MACOS_INSTALLER_PASSWORD: ${{ secrets.MACOS_INSTALLER_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+      NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-binaries
+          path: dist
+      - name: Unsigned
+        if: env.MACOS_CERTIFICATE_P12 == '' || env.MACOS_INSTALLER_P12 == ''
+        run: echo "::warning::The macOS agent and Orbit-Agent-macOS.pkg are unsigned. Set the MACOS_* secrets (see the top of .github/workflows/agent.yml) to sign them."
+      - name: Signing keychain
+        if: env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_INSTALLER_P12 != ''
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          password="$(uuidgen)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/app.p12"
+          echo "$MACOS_INSTALLER_P12" | base64 --decode > "$RUNNER_TEMP/installer.p12"
+          security import "$RUNNER_TEMP/app.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/installer.p12" -k "$keychain" -P "$MACOS_INSTALLER_PASSWORD" -T /usr/bin/productbuild -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/app.p12" "$RUNNER_TEMP/installer.p12"
+          {
+            echo "KEYCHAIN=$keychain"
+            echo "MAC_APP_IDENTITY=Developer ID Application"
+            echo "MAC_INSTALLER_IDENTITY=Developer ID Installer"
+          } >> "$GITHUB_ENV"
+      - name: Package
+        run: |
+          chmod +x dist/orbit-agent-darwin-*
+          sh scripts/package_agent_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-macos
+          path: |
+            dist/orbit-agent-darwin-*
+            dist/Orbit-Agent-macOS.pkg
+
+  windows:
+    needs: build
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-binaries
+          path: dist
+      - name: Unsigned
+        if: env.WINDOWS_CERTIFICATE_PFX == ''
+        run: echo "::warning::The Windows agent and its .msi files are unsigned. Set WINDOWS_CERTIFICATE_PFX and WINDOWS_CERTIFICATE_PASSWORD to sign them."
+      - name: Signing tool
+        if: env.WINDOWS_CERTIFICATE_PFX != ''
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "sign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          "SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
+          "SIGN_PFX=$pfx" >> $env:GITHUB_ENV
+      - name: Sign the agent
+        if: env.WINDOWS_CERTIFICATE_PFX != ''
+        run: |
+          & $env:SIGNTOOL sign /f $env:SIGN_PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\orbit-agent-windows-amd64.exe dist\orbit-agent-windows-arm64.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the .msi files
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          foreach ($pair in @(@("x64", "amd64"), @("arm64", "arm64"))) {
+            $arch, $goarch = $pair
+            wix build packaging\windows\OrbitAgent.wxs -arch $arch -d "Version=$env:VERSION" -d "Binary=dist\orbit-agent-windows-$goarch.exe" -o "dist\Orbit-Agent-Windows-$arch.msi"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          Remove-Item dist\*.wixpdb -ErrorAction SilentlyContinue
+      - name: Sign the .msi files
+        if: env.WINDOWS_CERTIFICATE_PFX != ''
+        run: |
+          & $env:SIGNTOOL sign /f $env:SIGN_PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\Orbit-Agent-Windows-x64.msi dist\Orbit-Agent-Windows-arm64.msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Forget the certificate
+        if: always() && env.SIGN_PFX != ''
+        run: Remove-Item $env:SIGN_PFX -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-windows
+          path: |
+            dist/orbit-agent-windows-*
+            dist/Orbit-Agent-Windows-*.msi
+
+  publish:
+    needs: [build, macos, windows]
+    # The binaries alone are enough for agents to update themselves: publish
+    # them even when a package didn't build, and say so.
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-binaries
+          path: dist
+      # The signed builds replace the unsigned ones.
+      - uses: actions/download-artifact@v4
+        if: needs.macos.result == 'success'
+        with:
+          name: agent-macos
+          path: dist
+      - uses: actions/download-artifact@v4
+        if: needs.windows.result == 'success'
+        with:
+          name: agent-windows
+          path: dist
+      - name: Missing packages
+        if: needs.macos.result != 'success' || needs.windows.result != 'success'
+        run: echo "::warning::A package job failed (macOS ${{ needs.macos.result }}, Windows ${{ needs.windows.result }}); its .pkg or .msi is missing and its binaries are the unsigned ones."
+      - name: Checksums and releases.json
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/agent-v${VERSION}" VERSION="$VERSION" sh scripts/build_agent.sh manifest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbit-agent
+          path: dist/*
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/agent-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --title "Orbit agent ${GITHUB_REF_NAME#agent-v}" --notes "Set ORBIT_RMM_AGENT_RELEASES on the server to the contents of releases.json so agents update themselves. Orbit-Agent-macOS.pkg and the Orbit-Agent-Windows .msi files deploy the agent through an MDM (README.md)."
