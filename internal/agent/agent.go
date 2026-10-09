@@ -4,6 +4,8 @@ package agent
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/api"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/config"
+	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/pulse"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/remote"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/service"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/shell"
@@ -37,6 +40,7 @@ type Agent struct {
 	rebootSince int64
 	queue       chan *tasks.Task
 	exit        chan error
+	nudge       chan struct{}
 }
 
 // New makes an agent from its configuration.
@@ -50,6 +54,7 @@ func New(cfg *config.Config, version string, logger *log.Logger) *Agent {
 		Metrics: system.Metrics,
 		queue:   make(chan *tasks.Task, 64),
 		exit:    make(chan error, 1),
+		nudge:   make(chan struct{}, 1),
 	}
 }
 
@@ -82,6 +87,7 @@ func (a *Agent) Once(ctx context.Context) error {
 // Run checks in until the context ends or the server retires this computer.
 func (a *Agent) Run(ctx context.Context) error {
 	go a.worker(ctx)
+	go a.pulse(ctx)
 	backoff := 10 * time.Second
 	for {
 		interval := time.Duration(a.Config.CheckinSeconds) * time.Second
@@ -101,6 +107,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			if resp.CheckinSeconds > 0 {
 				interval = time.Duration(resp.CheckinSeconds) * time.Second
 			}
+			a.rememberPulseAddr(resp.PulseAddr)
 			a.enqueue(resp.Tasks)
 			live := resp.Live
 			for live && ctx.Err() == nil {
@@ -118,8 +125,68 @@ func (a *Agent) Run(ctx context.Context) error {
 			return ctx.Err()
 		case err := <-a.exit:
 			return err
+		case <-a.nudge:
+			// The pulse channel said there's work; check in now.
 		case <-time.After(interval + jitter):
 		}
+	}
+}
+
+// pulse keeps the connection to the server open so a nudge reaches the agent at
+// once (internal/pulse). It needs the server's address, learned from a
+// check-in; without one it does nothing.
+func (a *Agent) pulse(ctx context.Context) {
+	for a.Config.PulseAddr == "" {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
+	}
+	signer, err := a.Config.PulseKey()
+	if err != nil {
+		a.Log.Printf("pulse: couldn't make a key: %v", err)
+		return
+	}
+	public := base64.StdEncoding.EncodeToString(signer.Public().(ed25519.PublicKey))
+	for ctx.Err() == nil {
+		if err := a.Client.RegisterPulseKey(ctx, public); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
+	}
+	serverKey, err := base64.StdEncoding.DecodeString(a.Config.ServerKey)
+	if err != nil || len(serverKey) != ed25519.PublicKeySize {
+		a.Log.Printf("pulse: the pinned server key is unusable")
+		return
+	}
+	pulse.Maintain(ctx, pulse.Options{
+		Addr: a.Config.PulseAddr, AgentID: a.Config.AgentID,
+		ServerKey: ed25519.PublicKey(serverKey), Signer: signer,
+		OnNudge: a.wake, Logger: a.Log,
+	})
+}
+
+func (a *Agent) wake() {
+	select {
+	case a.nudge <- struct{}{}:
+	default:
+	}
+}
+
+// rememberPulseAddr saves the pulse address the server sent, if it changed, so a
+// restart picks it up (the pulse loop reads it once at start).
+func (a *Agent) rememberPulseAddr(addr string) {
+	if addr == a.Config.PulseAddr {
+		return
+	}
+	a.Config.PulseAddr = addr
+	if err := a.Config.Save(); err != nil {
+		a.Log.Printf("pulse: couldn't save the address: %v", err)
 	}
 }
 

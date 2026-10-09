@@ -120,7 +120,7 @@ func install(args []string, logger *log.Logger) error {
 		return fmt.Errorf("enrollment failed: %w", err)
 	}
 	cfg := &config.Config{Server: client.Server, AgentID: enrolled.AgentID, Secret: enrolled.Secret, ServerKey: enrolled.ServerKey,
-		CheckinSeconds: enrolled.CheckinSeconds, Device: enrolled.Device}
+		CheckinSeconds: enrolled.CheckinSeconds, Device: enrolled.Device, PulseAddr: enrolled.PulseAddr}
 	if err := cfg.Save(); err != nil {
 		return err
 	}

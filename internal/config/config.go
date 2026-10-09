@@ -6,6 +6,9 @@
 package config
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -21,6 +24,12 @@ type Config struct {
 	ServerKey      string `json:"server_key"`
 	CheckinSeconds int    `json:"checkin_seconds"`
 	Device         string `json:"device"`
+	// PulseAddr is where the agent keeps a connection open (host:port); the
+	// server sends it, and blank means the channel is off.
+	PulseAddr string `json:"pulse_addr,omitempty"`
+	// PulseSeed is base64 of this agent's 32-byte Ed25519 seed for the pulse
+	// channel, made on first use; the public half is registered with the server.
+	PulseSeed string `json:"pulse_seed,omitempty"`
 }
 
 // ErrNotEnrolled means there is no configuration yet.
@@ -75,6 +84,25 @@ func BinaryPath() string {
 
 // Path is the configuration file.
 func Path() string { return filepath.Join(Dir(), "config.json") }
+
+// PulseKey returns this agent's Ed25519 key for the pulse channel, making and
+// saving one on first use. The caller registers the public half with the server.
+func (c *Config) PulseKey() (ed25519.PrivateKey, error) {
+	if c.PulseSeed != "" {
+		if seed, err := base64.StdEncoding.DecodeString(c.PulseSeed); err == nil && len(seed) == ed25519.SeedSize {
+			return ed25519.NewKeyFromSeed(seed), nil
+		}
+	}
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	c.PulseSeed = base64.StdEncoding.EncodeToString(priv.Seed())
+	if err := c.Save(); err != nil {
+		return nil, err
+	}
+	return priv, nil
+}
 
 // Load reads the configuration.
 func Load() (*Config, error) {

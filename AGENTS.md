@@ -18,7 +18,8 @@ task. Say that it is missing and wait to be told what to do.
   Linux (`sh scripts/build_agent.sh`).
 - The wire format is fixed by Orbit MDM's `apps/rmm/signing.py` and this repository's
   `internal/tasks/open.go`, which must agree; so must Orbit MDM's `apps/rmm/remote.py` and
-  `internal/remote`. Change both repositories together and test them together (Orbit MDM's
+  `internal/remote`, and Orbit MDM's `apps/rmm/pulse.py` and `internal/pulse`. Change both
+  repositories together and test them together (Orbit MDM's
   README, "Testing the agent against the server").
 - Every push to `main` tags and publishes a release, `agent-v<version>` (`.github/workflows/agent.yml`,
   `scripts/next_version.sh`); raise `VERSION` for a major or minor release. Orbit MDM reads the

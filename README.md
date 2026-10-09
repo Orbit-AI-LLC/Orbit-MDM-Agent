@@ -84,6 +84,25 @@ Scripts can run as the signed-in person instead of root on macOS
 Output is kept to 512 KB a stream, and a script that runs past its timeout is
 stopped with everything it started.
 
+## The pulse channel
+
+So work doesn't wait for the next check-in, the agent keeps one connection open
+to the server (`internal/pulse/`, the server's `apps/rmm/pulse.py`). The agent
+always dials out to `pulse_addr` (from a check-in; a Railway TCP proxy in front
+of the server's `rmm_pulse` service), so nothing listens on the computer, and
+reconnects by itself whenever the link drops. When the server has a task it
+sends a **nudge** and the agent checks in at once over HTTPS; the link carries
+only that nudge and keepalives, never a task.
+
+The link is raw TCP, so it is authenticated and encrypted here. The server
+proves itself by signing the handshake with the Ed25519 key the agent pinned at
+enrollment — a fake or intercepting server can't, and is dropped. The agent
+proves itself by signing with its own Ed25519 key, generated on first use and
+registered over the authenticated API (`POST pulse_key`). Both sign a fresh
+X25519 exchange into the transcript, so a man in the middle can't substitute
+keys and the keys are forward secret; every frame after is ChaCha20-Poly1305, a
+separate key and a counter nonce each way.
+
 ## Remote sessions
 
 A `remote` task (`internal/remote/`) brings the agent to a live session an

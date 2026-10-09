@@ -64,6 +64,7 @@ type EnrollResponse struct {
 	Secret         string `json:"secret"`
 	ServerKey      string `json:"server_key"`
 	CheckinSeconds int    `json:"checkin_seconds"`
+	PulseAddr      string `json:"pulse_addr"`
 	Device         string `json:"device"`
 }
 
@@ -73,6 +74,7 @@ type CheckinResponse struct {
 	CheckinSeconds int      `json:"checkin_seconds"`
 	Live           bool     `json:"live"`
 	WatchServices  []string `json:"watch_services"`
+	PulseAddr      string   `json:"pulse_addr"`
 	ServerTime     int64    `json:"server_time"`
 }
 
@@ -173,6 +175,11 @@ func (c *Client) Wait(ctx context.Context) (*WaitResponse, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// RegisterPulseKey tells the server this agent's pulse channel public key (base64).
+func (c *Client) RegisterPulseKey(ctx context.Context, publicKey string) error {
+	return c.do(ctx, http.MethodPost, "pulse_key", map[string]any{"pulse_key": publicKey}, nil, true, 30*time.Second)
 }
 
 // Start says a task has begun.
