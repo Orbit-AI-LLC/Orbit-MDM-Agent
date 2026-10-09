@@ -77,7 +77,7 @@ holds up the check-ins.
 | Software install | `.msi` (`msiexec /qn`), `.exe` with its silent switch | `.pkg` (`installer`) | `.deb` (apt), `.rpm` (dnf or zypper) |
 | Restart, shut down | `shutdown.exe`, a minute's notice | `shutdown`, a minute's notice | `shutdown`, a minute's notice |
 | Lock | a one-off task in the signed-in person's session | `pmset displaysleepnow` | `loginctl lock-sessions` |
-| Remote session | a terminal (ConPTY) or a VNC desktop | a terminal (PTY) or Screen Sharing | a terminal (PTY) or x11vnc |
+| Remote session | a terminal (ConPTY) or a VNC desktop | a terminal (PTY) or the built-in VNC desktop | a terminal (PTY) or x11vnc |
 
 Scripts can run as the signed-in person instead of root on macOS
 (`launchctl asuser`) and Linux (`runuser`); on Windows they run as SYSTEM.
@@ -115,13 +115,23 @@ check-ins and other tasks go on as usual, and ends when the relay closes it.
   SYSTEM or root — colour, full-screen programs, tab completion and resizing,
   not one command at a time. Windows uses ConPTY (`conhost`), macOS and Linux
   a PTY with a login shell.
-- **Remote desktop:** the agent connects to the computer's VNC server and
-  relays its RFB stream to the admin's browser (noVNC), which speaks the
-  protocol and does any sign-in itself. On Windows and macOS it expects a
-  server already listening (Screen Sharing on a Mac; TightVNC, UltraVNC or
-  TigerVNC on Windows). On Linux it uses one if present, or starts `x11vnc`
-  for the session signed in at the screen, bound to localhost; whoever is at
-  the computer is told their screen is being viewed.
+- **Remote desktop:** the agent relays an RFB stream to the admin's browser
+  (noVNC). It uses a VNC server already listening on the computer if there is
+  one; otherwise it serves its **own, built in** (`internal/remote/vnc.go`),
+  bound to an in-process pipe — nothing opens a port, so only the agent can
+  reach it. The built-in server captures the screen (Zlib-compressed, scaled
+  down so frames stay light) and needs no screen sharing turned on.
+  - **macOS:** built in, using the system `screencapture`. It needs the Screen
+    Recording permission, which an MDM grants the agent with a PPPC profile
+    (System Settings → Privacy & Security → Screen Recording otherwise). The
+    session is **view-only** for now; mouse and keyboard control is the next
+    step (it needs the CoreGraphics event bridge).
+  - **Windows:** uses a VNC server if one is installed (TightVNC, UltraVNC,
+    TigerVNC); a built-in capture server is not implemented yet.
+  - **Linux:** uses one if present, or starts `x11vnc` for the session signed
+    in at the screen, bound to localhost.
+
+  Whoever is at the computer is told their screen is being viewed.
 
 ## Why a task can be trusted
 
