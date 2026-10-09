@@ -20,6 +20,7 @@ task. Say that it is missing and wait to be told what to do.
   `internal/tasks/open.go`, which must agree; so must Orbit MDM's `apps/rmm/remote.py` and
   `internal/remote`. Change both repositories together and test them together (Orbit MDM's
   README, "Testing the agent against the server").
-- Releases are published here by tagging `agent-v<version>` (`.github/workflows/agent.yml`). Orbit
-  MDM's installers download `orbit-agent-<os>-<arch>` from this repository's latest release, so it
-  must stay public.
+- Every push to `main` tags and publishes a release, `agent-v<version>` (`.github/workflows/agent.yml`,
+  `scripts/next_version.sh`); raise `VERSION` for a major or minor release. Orbit MDM reads the
+  latest release's `releases.json` on its own for its installers and agents' updates, so this
+  repository must stay public.

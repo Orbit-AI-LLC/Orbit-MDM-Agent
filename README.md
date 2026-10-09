@@ -124,15 +124,22 @@ sh scripts/build_agent.sh       # every platform into dist, with SHA256SUMS and 
 
 `.github/workflows/agent.yml` builds and tests on every push and pull
 request, builds the `.pkg` (on macOS) and the `.msi` files (on Windows, with
-WiX), and a tag `agent-v<version>` publishes a release. With its secrets set
-(listed at the top of the workflow) the macOS binaries are signed with a
-Developer ID and the `.pkg` with a Developer ID Installer certificate and
-notarized; the Windows binaries and `.msi` files are Authenticode-signed.
-Without them everything is built unsigned, with a warning. `SHA256SUMS` and
-`releases.json` are written after signing (`build_agent.sh manifest`). Put the
-release's `releases.json` in the server's `ORBIT_RMM_AGENT_RELEASES` and its
-version in `ORBIT_RMM_AGENT_VERSION`; agents running an older version are sent
-an `update_agent` task and replace themselves.
+WiX), and **on every push to `main` tags and publishes a release**,
+`agent-v<version>`. The version is the next patch after the newest tag, or
+`VERSION` when it has been raised there (a major or minor release;
+`scripts/next_version.sh`). Pushing a tag `agent-v<version>` by hand releases
+that version instead. With its secrets set (listed at the top of the workflow)
+the macOS binaries are signed with a Developer ID and the `.pkg` with a
+Developer ID Installer certificate and notarized; the Windows binaries and
+`.msi` files are Authenticode-signed. Without them everything is built
+unsigned, with a warning. `SHA256SUMS` and `releases.json` (the version and
+each binary's URL and SHA-256) are written after signing
+(`build_agent.sh manifest`).
+
+Orbit MDM reads `releases.json` from the latest release on its own (cached for
+ten minutes): its installers download that release's binaries and check them,
+and agents running an older version are sent an `update_agent` task and replace
+themselves. Nothing on the server needs changing for a release.
 
 ## Not yet
 

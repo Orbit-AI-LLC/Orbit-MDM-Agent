@@ -8,7 +8,8 @@
 #                                        has (after the binaries were signed)
 #
 # The manifest is SHA256SUMS (the binaries and any .pkg or .msi) and
-# releases.json (the binaries, which agents update themselves from).
+# releases.json (the version and the binaries, which the server reads from
+# the latest release for its installers and agents' updates).
 set -eu
 cd "$(dirname "$0")/.."
 VERSION="${VERSION:-$(cat VERSION)}"
@@ -30,8 +31,8 @@ fi
 
 sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 rm -f dist/SHA256SUMS
-json="{"
-sep=""
+json="{\"version\": \"$VERSION\""
+sep=", "
 for target in $TARGETS; do
   name="$(name_for "$target")"
   sum="$(sha "dist/$name")"

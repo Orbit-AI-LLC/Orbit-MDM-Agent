@@ -1,7 +1,11 @@
 # Builds the Orbit agent for Windows, macOS and Linux on every push and
 # pull request, packages it for deploying through an MDM (Orbit-Agent-macOS.pkg,
-# Orbit-Agent-Windows-x64.msi and -arm64.msi), and publishes a release with
-# checksums for a tag agent-v<version>.
+# Orbit-Agent-Windows-x64.msi and -arm64.msi), and on every push to main tags
+# and publishes a release with checksums: agent-v<version>, the version from
+# scripts/next_version.sh (the next patch, or VERSION when it's been raised).
+# Orbit MDM reads releases.json from the latest release on its own, for its
+# installers and to update agents. Pushing a tag agent-v<version> by hand
+# releases that version instead.
 #
 # Signing needs these repository secrets. Without them everything still builds
 # and publishes, unsigned, with a warning:
@@ -23,6 +27,11 @@ on:
 permissions:
   contents: write
 
+# One release at a time, so two pushes don't take the same version.
+concurrency:
+  group: agent-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -30,6 +39,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tags, for the next version
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -38,8 +49,7 @@ jobs:
       - id: version
         name: Version
         run: |
-          VERSION="$(cat VERSION)"
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then VERSION="${GITHUB_REF_NAME#agent-v}"; fi
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then VERSION="${GITHUB_REF_NAME#agent-v}"; else VERSION="$(sh scripts/next_version.sh)"; fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Build
         run: VERSION="${{ steps.version.outputs.version }}" sh scripts/build_agent.sh
@@ -192,7 +202,11 @@ jobs:
           name: orbit-agent
           path: dist/*
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/agent-v')
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/agent-v'))
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --title "Orbit agent ${GITHUB_REF_NAME#agent-v}" --notes "Set ORBIT_RMM_AGENT_RELEASES on the server to the contents of releases.json so agents update themselves. Orbit-Agent-macOS.pkg and the Orbit-Agent-Windows .msi files deploy the agent through an MDM (README.md)."
+          VERSION: ${{ needs.build.outputs.version }}
+        run: >-
+          gh release create "agent-v$VERSION" dist/* --target "$GITHUB_SHA" --latest
+          --title "Orbit agent $VERSION"
+          --notes "Orbit MDM reads releases.json from the latest release on its own: new installs get this version, and agents on an older one update themselves. Orbit-Agent-macOS.pkg and the Orbit-Agent-Windows .msi files deploy the agent through an MDM (README.md)."
