@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- A per-user LaunchAgent: the Orbit agent's menu-bar app, run in each GUI
+     session. The service (the ai.orbit.agent launch daemon) manages the
+     computer as root; this only shows what it reports. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.orbit.agent.menu</string>
+  <key>ProgramArguments</key>
+  <array><string>/Library/Orbit/Orbit Agent.app/Contents/MacOS/OrbitAgentMenu</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+</dict>
+</plist>

@@ -79,7 +79,8 @@ func Inventory(ctx context.Context) map[string]any {
 		"users":    signedInUsers(ctx),
 		// XProtect is always on; Gatekeeper is what an administrator can turn off.
 		"security": map[string]any{"encrypted": filevault, "firewall": firewall,
-			"antivirus": strings.Contains(run(ctx, 10*time.Second, "spctl", "--status"), "enabled")},
+			"antivirus":   strings.Contains(run(ctx, 10*time.Second, "spctl", "--status"), "enabled"),
+			"permissions": permissions(ctx)},
 		"software": software,
 	}
 }

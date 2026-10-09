@@ -34,6 +34,28 @@ chmod 755 "$work/root/Library/Orbit/orbit-agent"
 if [ -n "${MAC_APP_IDENTITY:-}" ]; then
   codesign --verify --strict "$work/root/Library/Orbit/orbit-agent"
 fi
+
+# The menu-bar app (menubar/macos), universal, in Orbit Agent.app beside the
+# binary, loaded as a per-user LaunchAgent so it runs in each GUI session.
+swiftc="$(xcrun -f swiftc)"
+sdk="$(xcrun --show-sdk-path)"
+app="$work/root/Library/Orbit/Orbit Agent.app"
+mkdir -p "$app/Contents/MacOS"
+for arch in arm64 x86_64; do
+  "$swiftc" -sdk "$sdk" -O -target "$arch-apple-macos12" -o "$work/menu-$arch" menubar/macos/OrbitAgentMenu.swift
+done
+lipo -create -output "$app/Contents/MacOS/OrbitAgentMenu" "$work/menu-arm64" "$work/menu-x86_64"
+chmod 755 "$app/Contents/MacOS/OrbitAgentMenu"
+sed "s/__VERSION__/$VERSION/g" menubar/macos/Info.plist > "$app/Contents/Info.plist"
+if [ -n "${MAC_APP_IDENTITY:-}" ]; then
+  # shellcheck disable=SC2046
+  codesign --force --options runtime --timestamp --identifier ai.orbit.agent.menu $(keychain) --sign "$MAC_APP_IDENTITY" "$app"
+  codesign --verify --strict "$app"
+fi
+mkdir -p "$work/root/Library/LaunchAgents"
+cp packaging/macos/ai.orbit.agent.menu.plist "$work/root/Library/LaunchAgents/ai.orbit.agent.menu.plist"
+chmod 644 "$work/root/Library/LaunchAgents/ai.orbit.agent.menu.plist"
+
 cp packaging/macos/postinstall "$work/scripts/postinstall"
 chmod 755 "$work/scripts/postinstall"
 # No extended attributes: they'd go into the payload as ._ files.

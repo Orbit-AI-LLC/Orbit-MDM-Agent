@@ -22,6 +22,7 @@ import (
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/remote"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/service"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/shell"
+	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/status"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/system"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/tasks"
 )
@@ -36,11 +37,12 @@ type Agent struct {
 	// Metrics reads health for a check-in; tests replace it.
 	Metrics func(ctx context.Context, watch []string) map[string]any
 
-	watch       []string
-	rebootSince int64
-	queue       chan *tasks.Task
-	exit        chan error
-	nudge       chan struct{}
+	watch           []string
+	rebootSince     int64
+	lastGoodCheckin string
+	queue           chan *tasks.Task
+	exit            chan error
+	nudge           chan struct{}
 }
 
 // New makes an agent from its configuration.
@@ -73,11 +75,15 @@ func (a *Agent) metrics(ctx context.Context) map[string]any {
 
 // Once checks in and runs whatever comes back, then returns.
 func (a *Agent) Once(ctx context.Context) error {
-	resp, err := a.Client.Checkin(ctx, a.metrics(ctx))
+	m := a.metrics(ctx)
+	resp, err := a.Client.Checkin(ctx, m)
 	if err != nil {
+		a.writeStatus(false, m)
 		return err
 	}
 	a.watch = resp.WatchServices
+	a.applySupport(resp.Support)
+	a.writeStatus(true, m)
 	for _, task := range a.open(resp.Tasks) {
 		a.run(ctx, task)
 	}
@@ -91,12 +97,14 @@ func (a *Agent) Run(ctx context.Context) error {
 	backoff := 10 * time.Second
 	for {
 		interval := time.Duration(a.Config.CheckinSeconds) * time.Second
-		resp, err := a.Client.Checkin(ctx, a.metrics(ctx))
+		m := a.metrics(ctx)
+		resp, err := a.Client.Checkin(ctx, m)
 		switch {
 		case errors.Is(err, api.ErrRetired), errors.Is(err, api.ErrUnauthorized):
 			return err
 		case err != nil:
 			a.Log.Printf("check-in failed: %v", err)
+			a.writeStatus(false, m)
 			interval = backoff
 			if backoff < 5*time.Minute {
 				backoff *= 2
@@ -108,6 +116,8 @@ func (a *Agent) Run(ctx context.Context) error {
 				interval = time.Duration(resp.CheckinSeconds) * time.Second
 			}
 			a.rememberPulseAddr(resp.PulseAddr)
+			a.applySupport(resp.Support)
+			a.writeStatus(true, m)
 			a.enqueue(resp.Tasks)
 			live := resp.Live
 			for live && ctx.Err() == nil {
@@ -188,6 +198,90 @@ func (a *Agent) rememberPulseAddr(addr string) {
 	if err := a.Config.Save(); err != nil {
 		a.Log.Printf("pulse: couldn't save the address: %v", err)
 	}
+}
+
+// applySupport remembers a help-desk contact the server sent, saving it so the
+// tray still has it after a restart, before the first check-in.
+func (a *Agent) applySupport(s *status.Support) {
+	if s == nil || *s == a.Config.Support {
+		return
+	}
+	a.Config.Support = *s
+	if err := a.Config.Save(); err != nil {
+		a.Log.Printf("couldn't save the help-desk contact: %v", err)
+	}
+}
+
+// writeStatus refreshes the world-readable file the tray reads, from the last
+// check-in's result and metrics (internal/status).
+func (a *Agent) writeStatus(ok bool, m map[string]any) {
+	host, _ := os.Hostname()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if ok {
+		a.lastGoodCheckin = now
+	}
+	s := status.Status{
+		Version:       a.Version,
+		Hostname:      host,
+		OS:            runtime.GOOS,
+		Enrolled:      true,
+		Server:        a.Config.Server,
+		Device:        a.Config.Device,
+		LastCheckin:   a.lastGoodCheckin,
+		LastCheckinOK: ok,
+		Support:       a.Config.Support,
+		UpdatedAt:     now,
+	}
+	if perms, _ := m["permissions"].(map[string]string); len(perms) > 0 {
+		s.Permissions = perms
+	}
+	s.Issues = issues(ok, m, s.Permissions)
+	s.Healthy = healthy(s.Issues)
+	if err := status.Write(config.StatusPath(), s); err != nil {
+		a.Log.Printf("couldn't write the status file: %v", err)
+	}
+}
+
+// issues turns the last check-in into the problems the tray shows, worst first.
+func issues(ok bool, m map[string]any, perms map[string]string) []status.Issue {
+	var out []status.Issue
+	if !ok {
+		out = append(out, status.Issue{ID: "checkin", Severity: status.Error,
+			Title: "Can't reach Orbit RMM", Detail: "The agent couldn't check in with the server."})
+	}
+	switch perms["screen_recording"] {
+	case status.Denied:
+		out = append(out, status.Issue{ID: "screen_recording", Severity: status.Error,
+			Title:  "Screen Recording is off",
+			Detail: "Remote support can't see this screen until Screen Recording is allowed for the Orbit agent.",
+			Fix:    "open_screen_recording"})
+	}
+	if perms["full_disk_access"] == status.Denied {
+		out = append(out, status.Issue{ID: "full_disk_access", Severity: status.Warning,
+			Title:  "Full Disk Access is off",
+			Detail: "Some inventory and management needs Full Disk Access for the Orbit agent.",
+			Fix:    "open_full_disk_access"})
+	}
+	if pending, _ := m["reboot_pending"].(bool); pending {
+		out = append(out, status.Issue{ID: "reboot", Severity: status.Warning,
+			Title: "Restart pending", Detail: "Updates need a restart to finish."})
+	}
+	if perms["accessibility"] == status.Denied {
+		out = append(out, status.Issue{ID: "accessibility", Severity: status.Info,
+			Title:  "Accessibility is off",
+			Detail: "Needed later for remote keyboard and mouse control.",
+			Fix:    "open_accessibility"})
+	}
+	return out
+}
+
+func healthy(issues []status.Issue) bool {
+	for _, i := range issues {
+		if i.Severity == status.Error {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *Agent) open(sealed []api.Sealed) []*tasks.Task {

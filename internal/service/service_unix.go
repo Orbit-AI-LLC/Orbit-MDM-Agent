@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 // Name is the service's name.
@@ -18,6 +19,11 @@ const Name = "orbit-agent"
 const label = "ai.orbit.agent"
 const plistPath = "/Library/LaunchDaemons/" + label + ".plist"
 const unitPath = "/etc/systemd/system/orbit-agent.service"
+
+// The macOS menu-bar app runs as a per-user LaunchAgent (packaging/macos).
+const menuLabel = "ai.orbit.agent.menu"
+const menuPlistPath = "/Library/LaunchAgents/" + menuLabel + ".plist"
+const menuAppPath = "/Library/Orbit/Orbit Agent.app"
 
 func unit(binary string) string {
 	return fmt.Sprintf(`[Unit]
@@ -77,10 +83,32 @@ func Install(binary string) error {
 	return sh("systemctl", "enable", "--now", "orbit-agent")
 }
 
+// bootoutMenuAgent stops the menu-bar app in the signed-in person's session, so
+// it goes away with the rest of the agent (macOS).
+func bootoutMenuAgent() {
+	out, err := exec.Command("stat", "-f%Su", "/dev/console").Output()
+	if err != nil {
+		return
+	}
+	user := strings.TrimSpace(string(out))
+	if user == "" || user == "root" {
+		return
+	}
+	uid, err := exec.Command("id", "-u", user).Output()
+	if err != nil {
+		return
+	}
+	_ = exec.Command("launchctl", "bootout", "gui/"+strings.TrimSpace(string(uid))+"/"+menuLabel).Run()
+}
+
 // Uninstall stops the service and removes it.
 func Uninstall() error {
 	if runtime.GOOS == "darwin" {
 		_ = exec.Command("launchctl", "bootout", "system/"+label).Run()
+		bootoutMenuAgent()
+		_ = os.Remove(menuPlistPath)
+		_ = os.RemoveAll(menuAppPath)
+		_ = os.Remove("/Library/Orbit/status.json")
 		return os.Remove(plistPath)
 	}
 	_ = exec.Command("systemctl", "disable", "--now", "orbit-agent").Run()

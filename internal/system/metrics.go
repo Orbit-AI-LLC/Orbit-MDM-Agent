@@ -24,6 +24,9 @@ func Metrics(ctx context.Context, watch []string) map[string]any {
 		out["uptime_hours"] = round1(up.Hours())
 	}
 	out["reboot_pending"] = rebootPending(ctx)
+	if perms := permissions(ctx); len(perms) > 0 {
+		out["permissions"] = perms
+	}
 	if len(watch) > 0 {
 		states := make([]map[string]any, 0, len(watch))
 		for _, name := range watch {

@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/status"
 )
 
 // Config is the agent's enrollment.
@@ -30,6 +32,9 @@ type Config struct {
 	// PulseSeed is base64 of this agent's 32-byte Ed25519 seed for the pulse
 	// channel, made on first use; the public half is registered with the server.
 	PulseSeed string `json:"pulse_seed,omitempty"`
+	// Support is the organization's help-desk contact, last sent by the server;
+	// kept so the tray can show it even before the first check-in after a start.
+	Support status.Support `json:"support,omitempty"`
 }
 
 // ErrNotEnrolled means there is no configuration yet.
@@ -84,6 +89,27 @@ func BinaryPath() string {
 
 // Path is the configuration file.
 func Path() string { return filepath.Join(Dir(), "config.json") }
+
+// PublicDir is a place anyone signed in can read, where the service writes the
+// tray's status file (unlike Dir, which only root or SYSTEM can read). On macOS
+// it's /Library/Orbit, beside the binary; on Windows the ProgramData folder,
+// which users can read; on Linux the state directory.
+func PublicDir() string {
+	if home := os.Getenv("ORBIT_AGENT_HOME"); home != "" {
+		return home
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return "/Library/Orbit"
+	case "windows":
+		return Dir()
+	default:
+		return StateDir()
+	}
+}
+
+// StatusPath is the world-readable status file the tray reads (internal/status).
+func StatusPath() string { return filepath.Join(PublicDir(), "status.json") }
 
 // PulseKey returns this agent's Ed25519 key for the pulse channel, making and
 // saving one on first use. The caller registers the public half with the server.

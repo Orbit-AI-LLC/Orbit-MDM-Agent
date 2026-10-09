@@ -7,4 +7,16 @@ log=/var/log/orbit-agent-install.log
 /Library/Orbit/orbit-agent install --package >>"$log" 2>&1
 status=$?
 [ "$status" -eq 0 ] || echo "orbit-agent install --package failed ($status); see $log" >&2
+
+# Start the menu-bar app now for whoever is signed in; otherwise the LaunchAgent
+# in /Library/LaunchAgents loads it at the next login.
+user=$(/usr/bin/stat -f%Su /dev/console 2>/dev/null)
+if [ -n "$user" ] && [ "$user" != "root" ]; then
+  uid=$(/usr/bin/id -u "$user" 2>/dev/null)
+  if [ -n "$uid" ]; then
+    /bin/launchctl bootout "gui/$uid/ai.orbit.agent.menu" >/dev/null 2>&1
+    /bin/launchctl bootstrap "gui/$uid" /Library/LaunchAgents/ai.orbit.agent.menu.plist >>"$log" 2>&1
+  fi
+fi
+
 exit "$status"

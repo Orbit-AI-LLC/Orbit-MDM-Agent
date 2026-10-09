@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Privacy Preferences Policy Control (PPPC) profile for the Orbit agent.
+
+  macOS won't let even a root daemon grant itself the privacy permissions the
+  agent needs — Screen Recording (the built-in remote desktop), Full Disk Access
+  (complete inventory) and Accessibility (remote keyboard and mouse, once it
+  lands). The only silent way to grant them is a configuration profile like this
+  one, pushed by your MDM (Orbit MDM, Jamf, Intune, Kandji…); otherwise the
+  person at the Mac grants them by hand (the menu-bar app's "Fix…" buttons open
+  the right pane), and Screen Recording needs them to be signed in.
+
+  Before deploying:
+    1. Replace __TEAM_ID__ with the Apple Developer Team ID the agent is signed
+       with (the OU of its Developer ID certificate). The agent's code-signing
+       identifier is ai.orbit.agent (set in scripts/package_agent_macos.sh).
+    2. Give the top-level PayloadUUID and PayloadIdentifier your own values, and
+       the same each time you update this profile.
+  Verify the requirement string against a signed build with:
+    codesign -d -r- /Library/Orbit/orbit-agent
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadType</key><string>Configuration</string>
+  <key>PayloadVersion</key><integer>1</integer>
+  <key>PayloadIdentifier</key><string>ai.orbit.agent.pppc</string>
+  <key>PayloadUUID</key><string>5F2B0C40-0000-4000-A000-ORBITAGENTPPPC</string>
+  <key>PayloadDisplayName</key><string>Orbit agent privacy permissions</string>
+  <key>PayloadDescription</key><string>Grants the Orbit RMM agent Screen Recording, Full Disk Access and Accessibility.</string>
+  <key>PayloadOrganization</key><string>Orbit</string>
+  <key>PayloadScope</key><string>System</string>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key><string>com.apple.TCC.configuration-profile-policy</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>PayloadIdentifier</key><string>ai.orbit.agent.pppc.tcc</string>
+      <key>PayloadUUID</key><string>5F2B0C40-0001-4000-A000-ORBITAGENTPPPC</string>
+      <key>PayloadDisplayName</key><string>Orbit agent TCC</string>
+      <key>Services</key>
+      <dict>
+        <key>ScreenCapture</key>
+        <array>
+          <dict>
+            <key>Identifier</key><string>ai.orbit.agent</string>
+            <key>IdentifierType</key><string>bundleID</string>
+            <key>CodeRequirement</key><string>identifier "ai.orbit.agent" and anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__"</string>
+            <key>Authorization</key><string>Allow</string>
+          </dict>
+        </array>
+        <key>SystemPolicyAllFiles</key>
+        <array>
+          <dict>
+            <key>Identifier</key><string>ai.orbit.agent</string>
+            <key>IdentifierType</key><string>bundleID</string>
+            <key>CodeRequirement</key><string>identifier "ai.orbit.agent" and anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__"</string>
+            <key>Allowed</key><true/>
+          </dict>
+        </array>
+        <key>Accessibility</key>
+        <array>
+          <dict>
+            <key>Identifier</key><string>ai.orbit.agent</string>
+            <key>IdentifierType</key><string>bundleID</string>
+            <key>CodeRequirement</key><string>identifier "ai.orbit.agent" and anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__"</string>
+            <key>Allowed</key><true/>
+          </dict>
+        </array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>

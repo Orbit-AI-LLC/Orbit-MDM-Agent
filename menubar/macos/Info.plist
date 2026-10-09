@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Orbit Agent</string>
+  <key>CFBundleDisplayName</key><string>Orbit Agent</string>
+  <key>CFBundleIdentifier</key><string>ai.orbit.agent.menu</string>
+  <key>CFBundleExecutable</key><string>OrbitAgentMenu</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__VERSION__</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <!-- An accessory app: a menu-bar item with no Dock icon and no main window. -->
+  <key>LSUIElement</key><true/>
+  <key>NSHumanReadableCopyright</key><string>Orbit</string>
+</dict>
+</plist>

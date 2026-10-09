@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/status"
 )
 
 // ErrRetired means the server no longer manages this computer.
@@ -76,6 +78,8 @@ type CheckinResponse struct {
 	WatchServices  []string `json:"watch_services"`
 	PulseAddr      string   `json:"pulse_addr"`
 	ServerTime     int64    `json:"server_time"`
+	// Support is the organization's help-desk contact, shown by the tray.
+	Support *status.Support `json:"support,omitempty"`
 }
 
 // WaitResponse is the answer to a long poll.
