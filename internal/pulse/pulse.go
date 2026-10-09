@@ -33,6 +33,7 @@ import (
 	"log"
 	mrand "math/rand/v2"
 	"net"
+	"sync"
 	"time"
 
 	"crypto/sha256"
@@ -45,8 +46,14 @@ const (
 	maxFrame         = 4096
 	dialTimeout      = 20 * time.Second
 	handshakeTimeout = 15 * time.Second
-	pingEvery        = 20 * time.Second
-	idleTimeout      = 90 * time.Second
+	// Ping while idle, and give up on a link we've heard nothing on for
+	// idleTimeout — the server does the same, so a dropped agent goes offline
+	// in the portal within seconds. These mirror apps/rmm/pulse.py.
+	pingEvery   = 15 * time.Second
+	idleTimeout = 40 * time.Second
+	// A TCP keepalive so a link cut without a close (a sleep, a dead router) is
+	// noticed by the kernel too, not only by the ping.
+	tcpKeepAlive = 15 * time.Second
 )
 
 // Options is what a pulse connection needs.
@@ -87,7 +94,7 @@ func Maintain(ctx context.Context, opt Options) {
 }
 
 func connect(ctx context.Context, opt Options) error {
-	dialer := net.Dialer{Timeout: dialTimeout}
+	dialer := net.Dialer{Timeout: dialTimeout, KeepAlive: tcpKeepAlive}
 	conn, err := dialer.DialContext(ctx, "tcp", opt.Addr)
 	if err != nil {
 		return fmt.Errorf("couldn't reach the pulse server: %w", err)
@@ -100,6 +107,11 @@ func connect(ctx context.Context, opt Options) error {
 		return fmt.Errorf("pulse handshake: %w", err)
 	}
 	opt.Logger.Printf("pulse: connected to %s", opt.Addr)
+	// Check in right after connecting, so work queued while the link was down
+	// (or while reconnecting) is picked up without waiting for the next nudge.
+	if opt.OnNudge != nil {
+		opt.OnNudge()
+	}
 	return serve(ctx, conn, sess, opt)
 }
 
@@ -224,6 +236,7 @@ type frame struct {
 type session struct {
 	send0   cipher.AEAD
 	recv0   cipher.AEAD
+	sendMu  sync.Mutex // one writer at a time: the pinger and the pong reply both send
 	sendCtr uint64
 	recvCtr uint64
 }
@@ -249,6 +262,8 @@ func nonce(counter uint64) []byte {
 }
 
 func (s *session) send(conn net.Conn, f frame) error {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
 	plaintext, _ := json.Marshal(f)
 	box := s.send0.Seal(nil, nonce(s.sendCtr), plaintext, nil)
 	s.sendCtr++
