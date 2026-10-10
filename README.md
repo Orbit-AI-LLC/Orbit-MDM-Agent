@@ -84,6 +84,30 @@ Scripts can run as the signed-in person instead of root on macOS
 Output is kept to 512 KB a stream, and a script that runs past its timeout is
 stopped with everything it started.
 
+## The menu-bar app (macOS)
+
+A small menu-bar app (`menubar/macos/`, built with `swiftc`) shows whoever is at
+a Mac how the agent is doing: healthy or not, the last check-in, any privacy
+permissions it still needs (each with a button to the right System Settings
+pane) and the organization's help desk. It holds no secrets and does nothing
+privileged — it only reads the status file the service writes each check-in
+(`/Library/Orbit/status.json`, `internal/status/`). It's an accessory
+`Orbit Agent.app` in `/Library/Orbit`, run in each GUI session by a per-user
+LaunchAgent (`ai.orbit.agent.menu`).
+
+The `.pkg` lays the app down and the postinstall starts it. But an agent updates
+itself by replacing only its binary — and the binary that runs an update is the
+old one — so the service also writes the app itself. At startup, when the app is
+missing or its version doesn't match (`internal/agent`'s `ensureMenuApp`), and
+again right after a self-update (`refreshMenuApp`), it downloads
+`orbit-agent-menu-darwin`, the universal menu binary published beside the agent
+binary in the same release, checks it against that release's `SHA256SUMS`, writes
+the bundle and LaunchAgent around it, and reloads it for whoever is signed in.
+The startup check is a no-op, with no network, once the installed app matches, so
+it costs nothing on a healthy computer. So a Mac enrolled before the app existed,
+or that updated binary-only, gets the icon the next time the agent starts — no
+reinstall, no waiting for another release.
+
 ## The pulse channel
 
 So work doesn't wait for the next check-in, the agent keeps one connection open
@@ -161,8 +185,11 @@ that version instead. With its secrets set (listed at the top of the workflow)
 the macOS binaries are signed with a Developer ID and the `.pkg` with a
 Developer ID Installer certificate and notarized; the Windows binaries and
 `.msi` files are Authenticode-signed. Without them everything is built
-unsigned, with a warning. `SHA256SUMS` and `releases.json` (the version and
-each binary's URL and SHA-256) are written after signing
+unsigned, with a warning. The macOS `.pkg` build also publishes
+`orbit-agent-menu-darwin`, the universal menu-bar binary agents refresh the
+menu-bar app from. `SHA256SUMS` (every published file) and `releases.json` (the
+version and each agent binary's URL and SHA-256; not the menu binary, which
+isn't a per-platform agent build) are written after signing
 (`build_agent.sh manifest`).
 
 Orbit MDM reads `releases.json` from the latest release on its own (cached for

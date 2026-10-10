@@ -2,7 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- A per-user LaunchAgent: the Orbit agent's menu-bar app, run in each GUI
      session. The service (the ai.orbit.agent launch daemon) manages the
-     computer as root; this only shows what it reports. -->
+     computer as root; this only shows what it reports.
+     Mirrored by menuLaunchAgentPlist in internal/service/menu_darwin.go, which
+     the agent writes on a self-update; keep the two in step. -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>ai.orbit.agent.menu</string>

@@ -42,11 +42,11 @@ for target in $TARGETS; do
 done
 # The macOS menu-bar binary (scripts/package_agent_macos.sh), when it was built:
 # a sidecar that agents download to refresh the menu-bar app after updating only
-# their binary. Its checksum goes in SHA256SUMS, where the agent looks it up.
+# their binary. Its checksum goes in SHA256SUMS, where the agent looks it up
+# beside the build it just updated to. It stays out of releases.json: the server
+# reads that to list per-platform agent builds, and this isn't one.
 if [ -f dist/orbit-agent-menu-darwin ]; then
-  sum="$(sha dist/orbit-agent-menu-darwin)"
-  echo "$sum  orbit-agent-menu-darwin" >> dist/SHA256SUMS
-  json="$json, \"menu-darwin\": {\"url\": \"$BASE/orbit-agent-menu-darwin\", \"sha256\": \"$sum\"}"
+  echo "$(sha dist/orbit-agent-menu-darwin)  orbit-agent-menu-darwin" >> dist/SHA256SUMS
 fi
 for package in dist/*.pkg dist/*.msi; do
   [ -f "$package" ] && echo "$(sha "$package")  ${package#dist/}" >> dist/SHA256SUMS

@@ -96,6 +96,7 @@ func (a *Agent) Once(ctx context.Context) error {
 func (a *Agent) Run(ctx context.Context) error {
 	go a.worker(ctx)
 	go a.pulse(ctx)
+	go a.ensureMenuApp(ctx)
 	backoff := 10 * time.Second
 	for {
 		interval := time.Duration(a.Config.CheckinSeconds) * time.Second
@@ -487,10 +488,30 @@ func (a *Agent) update(ctx context.Context, url, sha, version string) (api.Resul
 	}
 }
 
-// refreshMenuApp reinstalls the macOS menu-bar app for the version just updated
-// to. The menu binary is published beside the agent binary this update came from
-// (orbit-agent-menu-darwin), its checksum in that release's SHA256SUMS; the
-// service writes the app bundle and LaunchAgent around it (internal/service).
+// releaseDownloadBase is where a release publishes its assets; the menu-bar
+// binary (orbit-agent-menu-darwin) sits beside the agent binary under
+// agent-v<version>/. The agent reads it to heal the menu-bar app for its own
+// version (ensureMenuApp) and after an update (refreshMenuApp). The repository is
+// public so this stays reachable, the same place the server points updates at.
+const releaseDownloadBase = "https://github.com/Orbit-AI-LLC/Orbit-MDM-Agent/releases/download"
+
+// ensureMenuApp installs the macOS menu-bar app for the version now running when
+// it's missing or out of date. The service updates itself by replacing only its
+// binary, so without this an agent enrolled before the app existed, or one that
+// updated binary-only, never gets the icon until a later update. It runs at
+// startup; a no-op (and no network) when the app already matches, so it costs
+// nothing on a healthy computer. Best effort: a failure only means no icon yet.
+func (a *Agent) ensureMenuApp(ctx context.Context) {
+	if runtime.GOOS != "darwin" || service.MenuAppVersion() == a.Version {
+		return
+	}
+	if err := a.installMenuApp(ctx, releaseDownloadBase+"/agent-v"+a.Version, a.Version); err != nil {
+		a.Log.Printf("couldn't install the menu-bar app: %v", err)
+	}
+}
+
+// refreshMenuApp reinstalls the menu-bar app for the version just updated to,
+// from the same release the new binary came from.
 func (a *Agent) refreshMenuApp(ctx context.Context, binURL, version string) error {
 	u, err := url.Parse(binURL)
 	if err != nil {
@@ -498,7 +519,13 @@ func (a *Agent) refreshMenuApp(ctx context.Context, binURL, version string) erro
 	}
 	dir := *u
 	dir.Path = path.Dir(u.Path)
-	base := dir.String()
+	return a.installMenuApp(ctx, dir.String(), version)
+}
+
+// installMenuApp downloads the menu-bar binary from a release (base is that
+// release's download URL), checks it against the release's SHA256SUMS, and has
+// the service write the app bundle and LaunchAgent around it (internal/service).
+func (a *Agent) installMenuApp(ctx context.Context, base, version string) error {
 	sha, err := system.Checksum(ctx, base+"/SHA256SUMS", "orbit-agent-menu-darwin")
 	if err != nil {
 		return err

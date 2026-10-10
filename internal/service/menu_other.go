@@ -7,4 +7,7 @@ package service
 // InstallMenuApp is a no-op off macOS.
 func InstallMenuApp(binaryPath, version string) error { return nil }
 
+// MenuAppVersion is empty off macOS, where there's no menu-bar app.
+func MenuAppVersion() string { return "" }
+
 func bootstrapMenuAgent() {}

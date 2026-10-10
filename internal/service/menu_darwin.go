@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 )
 
 // The menu-bar app's bundle layout. The service (this binary, running as root)
@@ -55,6 +56,25 @@ const menuLaunchAgentPlist = `<?xml version="1.0" encoding="UTF-8"?>
 </dict>
 </plist>
 `
+
+var menuVersionRE = regexp.MustCompile(`CFBundleShortVersionString</key>\s*<string>([^<]*)</string>`)
+
+// MenuAppVersion is the version of the installed menu-bar app, or "" when it
+// isn't installed (no executable, or no version in its Info.plist). The agent
+// compares it with its own to decide whether the app needs (re)installing.
+func MenuAppVersion() string {
+	if _, err := os.Stat(menuExecPath); err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(menuInfoPath)
+	if err != nil {
+		return ""
+	}
+	if m := menuVersionRE.FindSubmatch(data); m != nil {
+		return string(m[1])
+	}
+	return ""
+}
 
 // InstallMenuApp writes the menu-bar app bundle around the given universal
 // binary, installs its per-user LaunchAgent, and starts it for whoever is signed
