@@ -97,6 +97,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.worker(ctx)
 	go a.pulse(ctx)
 	go a.ensureMenuApp(ctx)
+	go a.watchPermissions(ctx)
 	backoff := 10 * time.Second
 	for {
 		interval := time.Duration(a.Config.CheckinSeconds) * time.Second
@@ -507,6 +508,46 @@ func (a *Agent) ensureMenuApp(ctx context.Context) {
 	}
 	if err := a.installMenuApp(ctx, releaseDownloadBase+"/agent-v"+a.Version, a.Version); err != nil {
 		a.Log.Printf("couldn't install the menu-bar app: %v", err)
+	}
+}
+
+// watchPermissions keeps asking macOS for the privacy permissions the agent needs
+// until they're granted. The approval prompts only appear when the agent takes the
+// action they gate while someone is signed in, and only once per decision, so the
+// agent (re)asks at the moments a fresh prompt can appear: at startup — which
+// covers a self-update, since the service restarts into a new, undetermined binary
+// — and whenever it notices a new login or a wake from sleep. system.RequestPermissions
+// never disturbs a permission that's already granted (and knows which ones macOS
+// can even be asked for — Full Disk Access has no prompt, so the menu-bar app takes
+// the person to Settings for that), so this quietly does nothing on a healthy Mac.
+// macOS-only; a no-op elsewhere, where the agent already has the rights it needs.
+func (a *Agent) watchPermissions(ctx context.Context) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	// Ask once at startup: a login before the service started, or the restart a
+	// self-update just did, both land here.
+	system.RequestPermissions(ctx)
+	lastUser := system.ConsoleUser()
+	// A tick far longer than the interval means the Mac was asleep in between.
+	const interval = 30 * time.Second
+	last := time.Now()
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			woke := now.Sub(last) > 3*interval
+			last = now
+			user := system.ConsoleUser()
+			newLogin := user != "" && user != lastUser
+			lastUser = user
+			if woke || newLogin {
+				system.RequestPermissions(ctx)
+			}
+		}
 	}
 }
 

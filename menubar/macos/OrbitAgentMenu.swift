@@ -71,6 +71,9 @@ func readStatus() -> Status? {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var item: NSStatusItem!
     private var timer: Timer?
+    // When each Settings pane was last opened for a missing permission, so the
+    // nudge below doesn't reopen it on every wake (see requestMissingPermissions).
+    private var lastAsked: [String: Date] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -80,6 +83,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshIcon()
         // Keep the icon's health colour current even while the menu is closed.
         timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.refreshIcon() }
+        // At launch (so each login, and each self-update, which reloads the app)
+        // ask for whatever is still missing.
+        requestMissingPermissions()
+        // Do the same the moment the Mac wakes or someone signs in, and refresh so a
+        // permission the service is re-asking for (internal/agent watchPermissions)
+        // shows as resolved without waiting for the next tick.
+        let wsn = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification, NSWorkspace.screensDidWakeNotification] {
+            wsn.addObserver(self, selector: #selector(wakeOrLogin), name: name, object: nil)
+        }
+    }
+
+    // wakeOrLogin refreshes the icon and re-asks for any missing permission when the
+    // Mac wakes or someone signs in.
+    @objc private func wakeOrLogin() {
+        refreshIcon()
+        requestMissingPermissions()
+    }
+
+    // requestMissingPermissions takes the person to the right System Settings pane
+    // for each permission that macOS can't put up a prompt for on its own. The
+    // service raises the real prompt for Screen Recording (and later Accessibility)
+    // by attempting the action it gates (internal/system RequestPermissions); Full
+    // Disk Access has no prompt at all, so for it the only way to ask is to open the
+    // pane. To avoid reopening Settings on every wake, each pane is opened at most
+    // once an hour, and never once the permission is granted.
+    private func requestMissingPermissions() {
+        guard let perms = readStatus()?.permissions else { return }
+        // Permission → its fix action, for the ones with no system prompt.
+        let settingsOnly = ["full_disk_access": "open_full_disk_access"]
+        for (permission, fix) in settingsOnly {
+            guard perms[permission] == "denied", let pane = settingsPane(for: fix) else { continue }
+            if let last = lastAsked[permission], Date().timeIntervalSince(last) < 3600 { continue }
+            lastAsked[permission] = Date()
+            if let url = URL(string: pane) { NSWorkspace.shared.open(url) }
+        }
     }
 
     // MARK: Icon
@@ -99,24 +138,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.toolTip = status == nil ? "Orbit agent: no status yet" : "Orbit agent"
     }
 
-    // markImage is the Orbit RMM mark (a monitor with a heartbeat, in orbit) as an
-    // 18-pt template image, so the menu bar renders it in the right ink for light
-    // or dark and contentTintColor can colour it on a problem — in place of a bare
-    // SF Symbol, which read as an anonymous red "!". It is drawn from the mark's
-    // "small" glyph, a path in a 100-unit box with y running down, generated with
-    //   orbitmark path rmm 100 0.82 small
-    // from scripts/orbitmark.swift (the Orbit family mark renderer); to change the
-    // mark, regenerate the path there, never edit it by hand.
+    // markImage is the Orbit RMM mark (a monitor with a heartbeat, in orbit) as a
+    // menu-bar template image: an opaque black glyph on a clear background, which
+    // macOS then inks to match the menu bar — white on a dark bar, black on a
+    // light one — and which contentTintColor can colour on a problem. In place of
+    // a bare SF Symbol, which read as an anonymous red "!". It's drawn into a
+    // bitmap with lockFocus (the drawing-handler initialiser doesn't reliably keep
+    // isTemplate, so the glyph came out black on every bar). The glyph is the
+    // mark's "small" form, a path in a 100-unit box with y running down, generated
+    // with `orbitmark path rmm 100 0.82 small` from scripts/orbitmark.swift (the
+    // Orbit family mark renderer); regenerate it there, never edit it by hand.
     private static let markImage: NSImage = {
-        let box: CGFloat = 18
-        let image = NSImage(size: NSSize(width: box, height: box), flipped: false) { rect in
-            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+        let box: CGFloat = 20
+        let image = NSImage(size: NSSize(width: box, height: box))
+        image.lockFocus()
+        if let ctx = NSGraphicsContext.current?.cgContext {
             let raw = AppDelegate.markPath
             let b = raw.boundingBoxOfPath
-            let inset: CGFloat = 0.92
-            let s = min(rect.width / b.width, rect.height / b.height) * inset
-            let ox = rect.minX + (rect.width - b.width * s) / 2
-            let oy = rect.minY + (rect.height - b.height * s) / 2
+            let inset: CGFloat = 0.98
+            let s = min(box / b.width, box / b.height) * inset
+            let ox = (box - b.width * s) / 2
+            let oy = (box - b.height * s) / 2
             // The box runs y down; flip it and fit the glyph's bounds to the icon.
             var t = CGAffineTransform(translationX: ox, y: oy)
                 .scaledBy(x: s, y: -s)
@@ -126,8 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 ctx.setFillColor(.black)
                 ctx.fillPath()
             }
-            return true
         }
+        image.unlockFocus()
         image.isTemplate = true
         return image
     }()

@@ -122,6 +122,46 @@ it costs nothing on a healthy computer. So a Mac enrolled before the app existed
 or that updated binary-only, gets the icon the next time the agent starts — no
 reinstall, no waiting for another release.
 
+### macOS privacy permissions
+
+The agent needs **Screen Recording** (the remote desktop) and **Full Disk Access**
+(complete inventory), and will need **Accessibility** when remote control lands.
+It asks for each of them on its own, but macOS treats the three differently, so
+the agent does too:
+
+- **Screen Recording** has a system prompt — but macOS only raises it when a
+  process actually *attempts a capture* while someone is signed in, and only once
+  per decision; reading the state never asks. So the agent takes a throwaway
+  capture to raise it (`internal/system`'s `RequestPermissions`).
+- **Accessibility** also has a prompt, but the remote desktop is view-only today,
+  so the agent won't ask for a permission it wouldn't use yet; the same path turns
+  it on when the feature that needs it lands.
+- **Full Disk Access** has *no prompt at all* — macOS never asks for it; a program
+  just silently can't read protected paths. The only way to ask is to open its
+  System Settings pane, which the menu-bar app does.
+
+`internal/agent`'s `watchPermissions` re-asks (for whatever is still missing, and
+only while someone is signed in) at the moments a fresh prompt can appear: at
+startup — which covers a self-update, since the service restarts into a new binary
+— and when it notices a new login or a wake from sleep. The menu-bar app does the
+same for the no-prompt permissions, opening the right Settings pane at most once an
+hour so it doesn't reopen on every wake, and refreshes so a permission just
+resolved shows as resolved at once. Nothing ever disturbs a permission that is
+already granted, and the menu-bar app's **Fix…** buttons are always there for a
+permission the person has explicitly denied (which macOS won't re-prompt for).
+
+**The grant survives an update only when the agent is signed with a stable
+identity.** TCC keys a *signed* app by its designated requirement — `identifier
+"ai.orbit.agent"` plus the Developer ID team — so a self-update that swaps the
+signed binary in place keeps Screen Recording, Full Disk Access and Accessibility
+without re-asking. An **unsigned or ad-hoc** build is keyed by the binary's path
+and code-hash instead, so every update looks like a new, undetermined app: the
+old grant drops and macOS lists the binary by a fallback name (a version string,
+a generic icon). Ship signed, notarized releases (`scripts/package_agent_macos.sh`
+with `MAC_APP_IDENTITY` set) so permissions persist; with an MDM, push
+`packaging/macos/Orbit-Agent-PPPC.mobileconfig` to pre-grant them by that same
+requirement.
+
 ## The pulse channel
 
 So work doesn't wait for the next check-in, the agent keeps one connection open
