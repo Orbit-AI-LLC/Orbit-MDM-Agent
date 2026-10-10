@@ -93,6 +93,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification, NSWorkspace.screensDidWakeNotification] {
             wsn.addObserver(self, selector: #selector(wakeOrLogin), name: name, object: nil)
         }
+        // Re-ink the mark promptly when the Light/Dark setting changes (the timer
+        // above also catches a wallpaper change that darkens the bar on its own).
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(refresh),
+            name: NSNotification.Name("AppleInterfaceThemeChangedNotification"), object: nil)
     }
 
     // wakeOrLogin refreshes the icon and re-asks for any missing permission when the
@@ -103,16 +107,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // requestMissingPermissions takes the person to the right System Settings pane
-    // for each permission that macOS can't put up a prompt for on its own. The
-    // service raises the real prompt for Screen Recording (and later Accessibility)
-    // by attempting the action it gates (internal/system RequestPermissions); Full
-    // Disk Access has no prompt at all, so for it the only way to ask is to open the
-    // pane. To avoid reopening Settings on every wake, each pane is opened at most
-    // once an hour, and never once the permission is granted.
+    // for each permission that's still denied. macOS only raises an on-screen prompt
+    // for a foreground app in the signed-in user's session, never for the root
+    // service — so for both Full Disk Access (which has no prompt at all) and Screen
+    // Recording (whose prompt the daemon can't trigger) the reliable way to ask is
+    // to open the pane for the person to switch Orbit Agent on. Accessibility is left
+    // out until the remote-control feature that needs it ships. To avoid reopening
+    // Settings on every wake, each pane is opened at most once an hour, and never
+    // once the permission is granted.
     private func requestMissingPermissions() {
         guard let perms = readStatus()?.permissions else { return }
-        // Permission → its fix action, for the ones with no system prompt.
-        let settingsOnly = ["full_disk_access": "open_full_disk_access"]
+        // Permission → the Settings pane to open for it.
+        let settingsOnly = [
+            "full_disk_access": "open_full_disk_access",
+            "screen_recording": "open_screen_recording",
+        ]
         for (permission, fix) in settingsOnly {
             guard perms[permission] == "denied", let pane = settingsPane(for: fix) else { continue }
             if let last = lastAsked[permission], Date().timeIntervalSince(last) < 3600 { continue }
@@ -127,28 +136,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let button = item.button else { return }
         let status = readStatus()
         let worst = severity(of: status)
-        button.image = Self.markImage
-        // The mark is a template image, so the menu bar inks it to match light or
-        // dark on its own; colour it only when something needs attention.
+        // Colour the mark ourselves instead of using a template image: on recent
+        // macOS a template inks to the system Light/Dark setting rather than the
+        // menu bar's real appearance, so in Light mode over a dark wallpaper — a
+        // dark-looking bar — it came out black and vanished. We pick the ink from
+        // the status item's own appearance, which does follow the bar, and turn it
+        // amber or red only when something needs attention.
+        let ink: NSColor
         switch worst {
-        case .error: button.contentTintColor = .systemRed
-        case .warning: button.contentTintColor = .systemOrange
-        case .none: button.contentTintColor = nil
+        case .error: ink = .systemRed
+        case .warning: ink = .systemOrange
+        case .none: ink = Self.menuBarIsDark(button) ? .white : .black
         }
+        button.image = Self.markImage(ink)
+        button.contentTintColor = nil
         button.toolTip = status == nil ? "Orbit agent: no status yet" : "Orbit agent"
     }
 
-    // markImage is the Orbit RMM mark (a monitor with a heartbeat, in orbit) as a
-    // menu-bar template image: an opaque black glyph on a clear background, which
-    // macOS then inks to match the menu bar — white on a dark bar, black on a
-    // light one — and which contentTintColor can colour on a problem. In place of
-    // a bare SF Symbol, which read as an anonymous red "!". It's drawn into a
-    // bitmap with lockFocus (the drawing-handler initialiser doesn't reliably keep
-    // isTemplate, so the glyph came out black on every bar). The glyph is the
-    // mark's "small" form, a path in a 100-unit box with y running down, generated
-    // with `orbitmark path rmm 100 0.82 small` from scripts/orbitmark.swift (the
-    // Orbit family mark renderer); regenerate it there, never edit it by hand.
-    private static let markImage: NSImage = {
+    // menuBarIsDark reports whether the bar behind the status item is dark, so the
+    // mark can be inked to contrast with it. It reads the status item's own
+    // appearance, which follows the menu bar (dark over a dark wallpaper even in
+    // Light mode) — unlike a template image, which on recent macOS inked to the
+    // system Light/Dark setting instead and left a black mark on a dark bar.
+    private static func menuBarIsDark(_ button: NSStatusBarButton) -> Bool {
+        button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
+    // markImage draws the Orbit RMM mark (a monitor with a heartbeat, in orbit) in
+    // one colour at the menu-bar size — in place of a bare SF Symbol, which read as
+    // an anonymous red "!". The glyph is the mark's "small" form, a path in a
+    // 100-unit box with y running down, generated with
+    //   orbitmark path rmm 100 0.82 small
+    // from scripts/orbitmark.swift (the Orbit family mark renderer); regenerate the
+    // path there, never edit it by hand.
+    private static func markImage(_ color: NSColor) -> NSImage {
         let box: CGFloat = 20
         let image = NSImage(size: NSSize(width: box, height: box))
         image.lockFocus()
@@ -165,14 +186,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .translatedBy(x: -b.minX, y: -b.maxY)
             if let fitted = raw.copy(using: &t) {
                 ctx.addPath(fitted)
-                ctx.setFillColor(.black)
+                ctx.setFillColor(color.cgColor)
                 ctx.fillPath()
             }
         }
         image.unlockFocus()
-        image.isTemplate = true
         return image
-    }()
+    }
 
     // markPath parses the embedded glyph (absolute SVG M/L/Q/C/Z commands) into a
     // CGPath in the 100-unit box it was generated in.

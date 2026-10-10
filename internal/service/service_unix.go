@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Name is the service's name.
@@ -65,14 +66,37 @@ func sh(name string, args ...string) error {
 	return nil
 }
 
+// reloadDaemon loads the launch daemon from plistPath, replacing any running
+// instance. launchctl's bootout is asynchronous — bootstrapping before the old
+// job's label is released fails with "Bootstrap failed: 5: Input/output error" —
+// so this boots the old one out, waits for the label to disappear, then
+// bootstraps, and retries the whole dance a few times in case the wait lost the
+// race (as it does on an upgrade, where the job is loaded when install runs).
+func reloadDaemon() error {
+	var last error
+	for attempt := 0; attempt < 5; attempt++ {
+		_ = exec.Command("launchctl", "bootout", "system/"+label).Run()
+		for i := 0; i < 25; i++ { // up to ~5s for launchd to release the label
+			if exec.Command("launchctl", "print", "system/"+label).Run() != nil {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		if last = sh("launchctl", "bootstrap", "system", plistPath); last == nil {
+			return nil
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return last
+}
+
 // Install registers and starts the service.
 func Install(binary string) error {
 	if runtime.GOOS == "darwin" {
 		if err := os.WriteFile(plistPath, []byte(plist(binary)), 0o644); err != nil {
 			return err
 		}
-		_ = exec.Command("launchctl", "bootout", "system/"+label).Run()
-		if err := sh("launchctl", "bootstrap", "system", plistPath); err != nil {
+		if err := reloadDaemon(); err != nil {
 			return err
 		}
 		// When a package already laid the menu-bar app down, make sure it's
