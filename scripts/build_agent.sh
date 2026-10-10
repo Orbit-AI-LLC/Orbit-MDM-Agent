@@ -40,6 +40,14 @@ for target in $TARGETS; do
   json="$json$sep\"${target%/*}-${target#*/}\": {\"url\": \"$BASE/$name\", \"sha256\": \"$sum\"}"
   sep=", "
 done
+# The macOS menu-bar binary (scripts/package_agent_macos.sh), when it was built:
+# a sidecar that agents download to refresh the menu-bar app after updating only
+# their binary. Its checksum goes in SHA256SUMS, where the agent looks it up.
+if [ -f dist/orbit-agent-menu-darwin ]; then
+  sum="$(sha dist/orbit-agent-menu-darwin)"
+  echo "$sum  orbit-agent-menu-darwin" >> dist/SHA256SUMS
+  json="$json, \"menu-darwin\": {\"url\": \"$BASE/orbit-agent-menu-darwin\", \"sha256\": \"$sum\"}"
+fi
 for package in dist/*.pkg dist/*.msi; do
   [ -f "$package" ] && echo "$(sha "$package")  ${package#dist/}" >> dist/SHA256SUMS
 done

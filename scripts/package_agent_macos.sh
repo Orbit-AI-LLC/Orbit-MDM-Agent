@@ -46,6 +46,16 @@ for arch in arm64 x86_64; do
 done
 lipo -create -output "$app/Contents/MacOS/OrbitAgentMenu" "$work/menu-arm64" "$work/menu-x86_64"
 chmod 755 "$app/Contents/MacOS/OrbitAgentMenu"
+# The same universal binary as a standalone release asset: agents that update
+# only their binary download it to refresh the menu-bar app (internal/agent's
+# refreshMenuApp, internal/service). The manifest step adds it to SHA256SUMS and
+# releases.json.
+cp "$app/Contents/MacOS/OrbitAgentMenu" "$dist/orbit-agent-menu-darwin"
+if [ -n "${MAC_APP_IDENTITY:-}" ]; then
+  # shellcheck disable=SC2046
+  codesign --force --options runtime --timestamp --identifier ai.orbit.agent.menu $(keychain) --sign "$MAC_APP_IDENTITY" "$dist/orbit-agent-menu-darwin"
+  codesign --verify --strict "$dist/orbit-agent-menu-darwin"
+fi
 sed "s/__VERSION__/$VERSION/g" menubar/macos/Info.plist > "$app/Contents/Info.plist"
 if [ -n "${MAC_APP_IDENTITY:-}" ]; then
   # shellcheck disable=SC2046

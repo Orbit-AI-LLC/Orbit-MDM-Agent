@@ -109,6 +109,7 @@ jobs:
           name: agent-macos
           path: |
             dist/orbit-agent-darwin-*
+            dist/orbit-agent-menu-darwin
             dist/Orbit-Agent-macOS.pkg
 
   windows:

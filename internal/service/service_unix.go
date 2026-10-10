@@ -72,7 +72,16 @@ func Install(binary string) error {
 			return err
 		}
 		_ = exec.Command("launchctl", "bootout", "system/"+label).Run()
-		return sh("launchctl", "bootstrap", "system", plistPath)
+		if err := sh("launchctl", "bootstrap", "system", plistPath); err != nil {
+			return err
+		}
+		// When a package already laid the menu-bar app down, make sure it's
+		// running for whoever is signed in (fresh installs do this in the
+		// postinstall too); self-updates write it in agent.update.
+		if _, err := os.Stat(menuAppPath); err == nil {
+			bootstrapMenuAgent()
+		}
+		return nil
 	}
 	if err := os.WriteFile(unitPath, []byte(unit(binary)), 0o644); err != nil {
 		return err
@@ -83,22 +92,37 @@ func Install(binary string) error {
 	return sh("systemctl", "enable", "--now", "orbit-agent")
 }
 
-// bootoutMenuAgent stops the menu-bar app in the signed-in person's session, so
-// it goes away with the rest of the agent (macOS).
-func bootoutMenuAgent() {
+// consoleUID is the uid of whoever is signed in at the Mac's screen, or "", false
+// when that's nobody (the login window, where the user is "root"). The menu-bar
+// app is a per-user LaunchAgent, so loading or unloading it needs this uid.
+func consoleUID() (string, bool) {
 	out, err := exec.Command("stat", "-f%Su", "/dev/console").Output()
 	if err != nil {
-		return
+		return "", false
 	}
 	user := strings.TrimSpace(string(out))
 	if user == "" || user == "root" {
-		return
+		return "", false
 	}
 	uid, err := exec.Command("id", "-u", user).Output()
 	if err != nil {
+		return "", false
+	}
+	id := strings.TrimSpace(string(uid))
+	if id == "" {
+		return "", false
+	}
+	return id, true
+}
+
+// bootoutMenuAgent stops the menu-bar app in the signed-in person's session, so
+// it goes away with the rest of the agent (macOS).
+func bootoutMenuAgent() {
+	uid, ok := consoleUID()
+	if !ok {
 		return
 	}
-	_ = exec.Command("launchctl", "bootout", "gui/"+strings.TrimSpace(string(uid))+"/"+menuLabel).Run()
+	_ = exec.Command("launchctl", "bootout", "gui/"+uid+"/"+menuLabel).Run()
 }
 
 // Uninstall stops the service and removes it.

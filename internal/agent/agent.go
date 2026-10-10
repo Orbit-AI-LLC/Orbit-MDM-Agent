@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -470,11 +472,47 @@ func (a *Agent) update(ctx context.Context, url, sha, version string) (api.Resul
 	if runtime.GOOS != "windows" {
 		_ = os.Chmod(current, 0o755)
 	}
+	// Keep the macOS menu-bar app in step. Best effort: an agent that updated
+	// only its binary (enrolled before the app existed, or on a locked-down
+	// network) stays updated even if the icon can't be refreshed.
+	if runtime.GOOS == "darwin" {
+		if err := a.refreshMenuApp(ctx, url, version); err != nil {
+			a.Log.Printf("couldn't refresh the menu-bar app: %v", err)
+		}
+	}
 	return api.Result{ExitCode: code(0), Stdout: "Updated to " + version + "; restarting."}, func() error {
 		err := service.Restart()
 		a.exit <- errors.New("restarting after an update")
 		return err
 	}
+}
+
+// refreshMenuApp reinstalls the macOS menu-bar app for the version just updated
+// to. The menu binary is published beside the agent binary this update came from
+// (orbit-agent-menu-darwin), its checksum in that release's SHA256SUMS; the
+// service writes the app bundle and LaunchAgent around it (internal/service).
+func (a *Agent) refreshMenuApp(ctx context.Context, binURL, version string) error {
+	u, err := url.Parse(binURL)
+	if err != nil {
+		return err
+	}
+	dir := *u
+	dir.Path = path.Dir(u.Path)
+	base := dir.String()
+	sha, err := system.Checksum(ctx, base+"/SHA256SUMS", "orbit-agent-menu-darwin")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp("", "orbit-menu-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	menuBin, err := system.Download(ctx, base+"/orbit-agent-menu-darwin", sha, tmp)
+	if err != nil {
+		return err
+	}
+	return service.InstallMenuApp(menuBin, version)
 }
 
 // uninstall removes the service, the configuration and the binary.
