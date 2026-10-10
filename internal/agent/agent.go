@@ -450,8 +450,16 @@ func (a *Agent) remote(ctx context.Context, session, mode, shell, relay, by stri
 	return api.Result{ExitCode: code(0), Stdout: "Joined the " + mode + " session."}, nil
 }
 
-// update replaces this binary with a newer one and has the service manager restart it.
+// update updates the agent to a newer release. On macOS it installs the release's
+// signed package, so the agent is re-laid as its .app bundle and the launch
+// daemon is reloaded from it — the privacy panes then show "Orbit Agent" with the
+// logo — rather than only its binary being swapped in place, which leaves an
+// already-running daemon a bare Unix tool. Elsewhere it replaces the binary in
+// place and has the service manager restart it.
 func (a *Agent) update(ctx context.Context, url, sha, version string) (api.Result, func() error) {
+	if runtime.GOOS == "darwin" {
+		return a.updateDarwin(ctx, url, version)
+	}
 	current, err := os.Executable()
 	if err != nil {
 		return failed(err), nil
@@ -474,14 +482,6 @@ func (a *Agent) update(ctx context.Context, url, sha, version string) (api.Resul
 	if runtime.GOOS != "windows" {
 		_ = os.Chmod(current, 0o755)
 	}
-	// Keep the macOS menu-bar app in step. Best effort: an agent that updated
-	// only its binary (enrolled before the app existed, or on a locked-down
-	// network) stays updated even if the icon can't be refreshed.
-	if runtime.GOOS == "darwin" {
-		if err := a.refreshMenuApp(ctx, url, version); err != nil {
-			a.Log.Printf("couldn't refresh the menu-bar app: %v", err)
-		}
-	}
 	return api.Result{ExitCode: code(0), Stdout: "Updated to " + version + "; restarting."}, func() error {
 		err := service.Restart()
 		a.exit <- errors.New("restarting after an update")
@@ -489,11 +489,63 @@ func (a *Agent) update(ctx context.Context, url, sha, version string) (api.Resul
 	}
 }
 
+// macOSPackage is the installer package a release publishes beside the agent
+// binaries (scripts/package_agent_macos.sh, .github/workflows/agent.yml).
+const macOSPackage = "Orbit-Agent-macOS.pkg"
+
+// updateDarwin updates a macOS agent by installing the release's signed .pkg,
+// letting the system installer (installd) re-lay the Orbit Agent Service.app
+// bundle and reload the launch daemon from it through the package's postinstall.
+// installd does that in its own process, so it finishes even as this daemon is
+// replaced — a daemon can't reliably reload itself onto a new path, because the
+// reload boots it out before the restart lands. The .pkg and its checksum sit
+// beside the per-platform binary the server points updates at.
+func (a *Agent) updateDarwin(ctx context.Context, binURL, version string) (api.Result, func() error) {
+	base, err := releaseDir(binURL)
+	if err != nil {
+		return failed(err), nil
+	}
+	sum, err := system.Checksum(ctx, base+"/SHA256SUMS", macOSPackage)
+	if err != nil {
+		return failed(err), nil
+	}
+	dir, err := os.MkdirTemp("", "orbit-update-")
+	if err != nil {
+		return failed(err), nil
+	}
+	pkg, err := system.Download(ctx, base+"/"+macOSPackage, sum, dir)
+	if err != nil {
+		os.RemoveAll(dir)
+		return failed(err), nil
+	}
+	return api.Result{ExitCode: code(0), Stdout: "Updating to " + version + " from the installer package; restarting."}, func() error {
+		// Started detached (internal/service) so installd outlives this daemon when
+		// the reload replaces it; installd removes the temp package when it's done.
+		// No a.exit here: the package's postinstall reloads the daemon, so this one
+		// keeps serving until it's replaced — and stays up if the install fails.
+		return service.InstallPackage(pkg)
+	}
+}
+
+// releaseDir is the directory URL a release's assets share, given the URL of one
+// of them (the per-platform binary the server points updates at); the .pkg, the
+// menu binary and SHA256SUMS all sit beside it.
+func releaseDir(assetURL string) (string, error) {
+	u, err := url.Parse(assetURL)
+	if err != nil {
+		return "", err
+	}
+	d := *u
+	d.Path = path.Dir(u.Path)
+	return d.String(), nil
+}
+
 // releaseDownloadBase is where a release publishes its assets; the menu-bar
 // binary (orbit-agent-menu-darwin) sits beside the agent binary under
 // agent-v<version>/. The agent reads it to heal the menu-bar app for its own
-// version (ensureMenuApp) and after an update (refreshMenuApp). The repository is
-// public so this stays reachable, the same place the server points updates at.
+// version (ensureMenuApp); an update installs the whole package, which lays the
+// menu app down too. The repository is public so this stays reachable, the same
+// place the server points updates at.
 const releaseDownloadBase = "https://github.com/Orbit-AI-LLC/Orbit-MDM-Agent/releases/download"
 
 // ensureMenuApp installs the macOS menu-bar app for the version now running when
@@ -549,18 +601,6 @@ func (a *Agent) watchPermissions(ctx context.Context) {
 			}
 		}
 	}
-}
-
-// refreshMenuApp reinstalls the menu-bar app for the version just updated to,
-// from the same release the new binary came from.
-func (a *Agent) refreshMenuApp(ctx context.Context, binURL, version string) error {
-	u, err := url.Parse(binURL)
-	if err != nil {
-		return err
-	}
-	dir := *u
-	dir.Path = path.Dir(u.Path)
-	return a.installMenuApp(ctx, dir.String(), version)
 }
 
 // installMenuApp downloads the menu-bar binary from a release (base is that

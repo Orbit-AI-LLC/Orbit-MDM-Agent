@@ -37,10 +37,11 @@ On macOS the service binary lives inside an `.app` bundle (`Orbit Agent
 Service.app`, identifier `ai.orbit.agent`) so that Full Disk Access, Screen
 Recording and Accessibility list it as **Orbit Agent** with the Orbit logo
 rather than as a bare `orbit-agent` Unix tool with a terminal icon. `install`
-writes the bundle's metadata (`internal/service`), self-updates swap only the
-binary inside it, and the bundle's icon is `scripts/build_icon.sh`'s output,
-embedded in the agent and shared with the menu-bar app below. An upgrade from an
-older agent moves it off the bare `/Library/Orbit/orbit-agent` path.
+writes the bundle's metadata (`internal/service`); a macOS update reinstalls the
+whole package (`internal/agent`'s `updateDarwin`), which re-lays the bundle; and the bundle's
+icon is `scripts/build_icon.sh`'s output, embedded in the agent and shared with
+the menu-bar app below. An update from an agent that predates the bundle moves it
+off the bare `/Library/Orbit/orbit-agent` path onto this one.
 
 ### Through an MDM
 
@@ -109,18 +110,17 @@ something needs attention — not a generic symbol. The bundle carries the same
 Orbit icon as the service (`scripts/build_icon.sh`), so it shows the logo in
 Login Items too.
 
-The `.pkg` lays the app down and the postinstall starts it. But an agent updates
-itself by replacing only its binary — and the binary that runs an update is the
-old one — so the service also writes the app itself. At startup, when the app is
-missing or its version doesn't match (`internal/agent`'s `ensureMenuApp`), and
-again right after a self-update (`refreshMenuApp`), it downloads
-`orbit-agent-menu-darwin`, the universal menu binary published beside the agent
-binary in the same release, checks it against that release's `SHA256SUMS`, writes
-the bundle and LaunchAgent around it, and reloads it for whoever is signed in.
-The startup check is a no-op, with no network, once the installed app matches, so
-it costs nothing on a healthy computer. So a Mac enrolled before the app existed,
-or that updated binary-only, gets the icon the next time the agent starts — no
-reinstall, no waiting for another release.
+The `.pkg` lays the app down and the postinstall starts it — and a macOS update
+reinstalls the whole package, so it lays a fresh menu app
+down too. As a safety net, at startup the service checks the installed app and,
+when it's missing or its version doesn't match (`internal/agent`'s
+`ensureMenuApp`), downloads `orbit-agent-menu-darwin`, the universal menu binary
+published beside the agent binary in the same release, checks it against that
+release's `SHA256SUMS`, writes the bundle and LaunchAgent around it, and reloads
+it for whoever is signed in. That check is a no-op, with no network, once the
+installed app matches, so it costs nothing on a healthy computer. So a Mac
+enrolled before the app existed still gets the icon the next time the agent
+starts — no reinstall, no waiting for another release.
 
 ### macOS privacy permissions
 
@@ -152,9 +152,9 @@ permission the person has explicitly denied (which macOS won't re-prompt for).
 
 **The grant survives an update only when the agent is signed with a stable
 identity.** TCC keys a *signed* app by its designated requirement — `identifier
-"ai.orbit.agent"` plus the Developer ID team — so a self-update that swaps the
-signed binary in place keeps Screen Recording, Full Disk Access and Accessibility
-without re-asking. An **unsigned or ad-hoc** build is keyed by the binary's path
+"ai.orbit.agent"` plus the Developer ID team — so an update that reinstalls a
+binary with that same identity keeps Screen Recording, Full Disk Access and
+Accessibility without re-asking. An **unsigned or ad-hoc** build is keyed by the binary's path
 and code-hash instead, so every update looks like a new, undetermined app: the
 old grant drops and macOS lists the binary by a fallback name (a version string,
 a generic icon). Ship signed, notarized releases (`scripts/package_agent_macos.sh`
@@ -248,8 +248,16 @@ isn't a per-platform agent build) are written after signing
 
 Orbit MDM reads `releases.json` from the latest release on its own (cached for
 ten minutes): its installers download that release's binaries and check them,
-and agents running an older version are sent an `update_agent` task and replace
-themselves. Nothing on the server needs changing for a release.
+and agents running an older version are sent an `update_agent` task. On Windows
+and Linux the agent downloads the release's per-platform binary and replaces
+itself in place. On **macOS** it installs that release's `.pkg` instead
+(`internal/agent`'s `updateDarwin`, which finds the package beside the binary the
+task points at and checks it against `SHA256SUMS`): the system installer re-lays
+the `Orbit Agent Service.app` bundle and reloads the launch daemon exactly as a
+fresh install does — so the privacy panes keep showing "Orbit Agent" — instead of
+swapping the binary under a running daemon and leaving it a bare Unix tool. The
+installer runs under `installd`, not the agent, so it finishes even as it replaces
+the agent. Nothing on the server needs changing for a release.
 
 ## Not yet
 

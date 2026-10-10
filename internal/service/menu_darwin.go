@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"syscall"
 )
 
 // orbitIcon is the Orbit logo both bundles show in System Settings and the
@@ -187,6 +188,20 @@ func writeIcon(path string) error {
 		return err
 	}
 	return os.WriteFile(path, orbitIcon, 0o644)
+}
+
+// InstallPackage installs a downloaded .pkg with the system installer so that an
+// update re-lays the whole bundle and reloads the launch daemon, the way a fresh
+// install does. It's started detached (its own session) and the real work runs
+// under installd, not this process, so the install finishes even when the
+// package's postinstall reloads — and so replaces — this very daemon. It cleans
+// up the package's temp directory when it's done.
+func InstallPackage(pkg string) error {
+	script := fmt.Sprintf(`/usr/sbin/installer -pkg %q -target / >>/var/log/orbit-agent-install.log 2>&1; /bin/rm -rf %q`,
+		pkg, filepath.Dir(pkg))
+	cmd := exec.Command("/bin/sh", "-c", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return cmd.Start()
 }
 
 // removeServiceBundle takes the root service's .app bundle off the computer on
