@@ -81,7 +81,12 @@ func BinaryPath() string {
 		}
 		return filepath.Join(base, "Orbit", "Agent", "orbit-agent.exe")
 	case "darwin":
-		return "/Library/Orbit/orbit-agent"
+		// Inside an .app bundle so Full Disk Access, Screen Recording and
+		// Accessibility list it as "Orbit Agent" with the Orbit logo instead of a
+		// bare Unix tool with a terminal icon. Kept in step with serviceExecPath
+		// in internal/service/menu_darwin.go and the .pkg payload in
+		// scripts/package_agent_macos.sh.
+		return "/Library/Orbit/Orbit Agent Service.app/Contents/MacOS/orbit-agent"
 	default:
 		return "/usr/local/bin/orbit-agent"
 	}

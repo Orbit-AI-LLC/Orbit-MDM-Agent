@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The root service's .app bundle Info.plist. The service binary lives at
+     Contents/MacOS/orbit-agent inside Orbit Agent Service.app, so macOS lists it
+     as "Orbit Agent" with the Orbit logo in Full Disk Access, Screen Recording
+     and Accessibility instead of as a bare Unix tool with a terminal icon.
+     Mirrored by serviceInfoPlist in internal/service/menu_darwin.go, which the
+     agent writes when it installs itself; keep the two in step. The identifier
+     stays ai.orbit.agent, the one the PPPC profile's code requirement keys on. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Orbit Agent</string>
+  <key>CFBundleDisplayName</key><string>Orbit Agent</string>
+  <key>CFBundleIdentifier</key><string>ai.orbit.agent</string>
+  <key>CFBundleExecutable</key><string>orbit-agent</string>
+  <key>CFBundleIconFile</key><string>OrbitAgent</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__VERSION__</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <!-- A launchd daemon, not an app someone opens. -->
+  <key>LSBackgroundOnly</key><true/>
+  <key>NSHumanReadableCopyright</key><string>Orbit</string>
+</dict>
+</plist>

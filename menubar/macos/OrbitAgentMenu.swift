@@ -88,15 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let button = item.button else { return }
         let status = readStatus()
         let worst = severity(of: status)
-        let symbol: String
-        switch worst {
-        case .error: symbol = "exclamationmark.triangle.fill"
-        case .warning: symbol = "exclamationmark.circle.fill"
-        case .none: symbol = "display"
-        }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Orbit agent")
-        image?.isTemplate = (worst == .none)
-        button.image = image
+        button.image = Self.markImage
+        // The mark is a template image, so the menu bar inks it to match light or
+        // dark on its own; colour it only when something needs attention.
         switch worst {
         case .error: button.contentTintColor = .systemRed
         case .warning: button.contentTintColor = .systemOrange
@@ -104,6 +98,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         button.toolTip = status == nil ? "Orbit agent: no status yet" : "Orbit agent"
     }
+
+    // markImage is the Orbit RMM mark (a monitor with a heartbeat, in orbit) as an
+    // 18-pt template image, so the menu bar renders it in the right ink for light
+    // or dark and contentTintColor can colour it on a problem — in place of a bare
+    // SF Symbol, which read as an anonymous red "!". It is drawn from the mark's
+    // "small" glyph, a path in a 100-unit box with y running down, generated with
+    //   orbitmark path rmm 100 0.82 small
+    // from scripts/orbitmark.swift (the Orbit family mark renderer); to change the
+    // mark, regenerate the path there, never edit it by hand.
+    private static let markImage: NSImage = {
+        let box: CGFloat = 18
+        let image = NSImage(size: NSSize(width: box, height: box), flipped: false) { rect in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            let raw = AppDelegate.markPath
+            let b = raw.boundingBoxOfPath
+            let inset: CGFloat = 0.92
+            let s = min(rect.width / b.width, rect.height / b.height) * inset
+            let ox = rect.minX + (rect.width - b.width * s) / 2
+            let oy = rect.minY + (rect.height - b.height * s) / 2
+            // The box runs y down; flip it and fit the glyph's bounds to the icon.
+            var t = CGAffineTransform(translationX: ox, y: oy)
+                .scaledBy(x: s, y: -s)
+                .translatedBy(x: -b.minX, y: -b.maxY)
+            if let fitted = raw.copy(using: &t) {
+                ctx.addPath(fitted)
+                ctx.setFillColor(.black)
+                ctx.fillPath()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }()
+
+    // markPath parses the embedded glyph (absolute SVG M/L/Q/C/Z commands) into a
+    // CGPath in the 100-unit box it was generated in.
+    private static let markPath: CGPath = parsePath(markPathData)
+
+    private static func parsePath(_ d: String) -> CGPath {
+        let path = CGMutablePath()
+        var nums: [CGFloat] = []
+        var cmd: Character = " "
+        var token = ""
+        func flush() { if !token.isEmpty { nums.append(CGFloat(Double(token) ?? 0)); token = "" } }
+        func p(_ i: Int) -> CGPoint { CGPoint(x: nums[i], y: nums[i + 1]) }
+        func apply() {
+            flush()
+            switch cmd {
+            case "M": path.move(to: p(0))
+            case "L": path.addLine(to: p(0))
+            case "Q": path.addQuadCurve(to: p(2), control: p(0))
+            case "C": path.addCurve(to: p(4), control1: p(0), control2: p(2))
+            case "Z", "z": path.closeSubpath()
+            default: break
+            }
+            nums.removeAll(keepingCapacity: true)
+        }
+        for ch in d {
+            if ch.isLetter { apply(); cmd = ch }
+            else if ch == " " || ch == "\n" || ch == "," { flush() }
+            else { token.append(ch) }
+        }
+        apply()
+        return path
+    }
+
+    private static let markPathData = "M53.85 71.57L62.13 71.57C63.32 71.57 64.3 72.47 64.41 73.63L64.43 73.86C64.43 75.13 63.4 76.15 62.13 76.15L36.49 76.15C35.31 76.15 34.33 75.25 34.21 74.09L34.2 73.86C34.2 72.99 34.69 72.24 35.4 71.85L36.64 71.57L44.78 71.57L44.78 69.44C47.8 68.55 50.84 67.51 53.85 66.35ZM84.2 40.85C85.42 42.12 85.38 44.13 84.12 45.35C73.22 55.89 49.59 66.62 30.98 69.58C21.31 71.11 14.26 70.39 10.76 67.08C9.96 66.33 9.38 65.46 9 64.53L14.9 62.14C14.95 62.26 15.03 62.36 15.13 62.46C15.79 63.08 17.31 63.62 19.6 63.86C22.3 64.13 25.82 63.96 29.98 63.3C47.37 60.53 69.8 50.34 79.7 40.78C80.96 39.55 82.98 39.59 84.2 40.85ZM79.54 57.06C79.54 59.8 77.31 62.03 74.57 62.03L63.9 62.03C69.69 59.27 75.06 56.19 79.54 52.98ZM79.54 28.81L79.54 37.32C78.83 37.61 78.17 38.03 77.59 38.59C72.58 43.44 64.06 48.51 54.66 52.58C54.82 52.41 54.96 52.2 55.08 51.96L59.06 44.1L67.45 44.1C69.15 44.1 70.52 42.73 70.52 41.03C70.52 39.33 69.15 37.95 67.45 37.95L57.17 37.95C56.01 37.95 54.95 38.6 54.43 39.64L52.92 42.62L48.6 29.74C47.74 27.18 44.23 26.89 42.97 29.29L38.39 37.95L28.16 37.95C26.46 37.95 25.08 39.33 25.08 41.03C25.08 42.73 26.46 44.1 28.16 44.1L40.25 44.1C41.39 44.1 42.43 43.47 42.97 42.46L45.05 38.51L49.42 51.55C49.86 52.86 50.99 53.58 52.16 53.64C44.59 56.76 36.59 59.18 29.51 60.3C26.15 60.83 23.23 61.04 20.93 60.92C19.81 60.01 19.09 58.62 19.09 57.06L19.09 28.81C19.09 26.07 21.31 23.85 24.05 23.85L74.57 23.85C77.31 23.85 79.54 26.07 79.54 28.81ZM48.44 38.8L48.36 38.83L47.93 37.55C47.08 35.02 43.62 34.74 42.37 37.1L40.28 41.05C40.28 41.06 40.26 41.07 40.25 41.07L28.57 41.07L28.73 40.99L38.39 40.99C39.52 40.99 40.55 40.36 41.08 39.37L44.08 33.67C44.85 33.35 45.63 33.04 46.42 32.76ZM91 31.1C91 34.47 88.27 37.2 84.9 37.2C84.08 37.2 83.29 37.04 82.57 36.74L82.57 28.81C82.57 27.73 82.36 26.7 81.96 25.76C82.83 25.28 83.84 25 84.9 25C88.27 25 91 27.73 91 31.1Z"
 
     private enum Level { case none, warning, error }
 

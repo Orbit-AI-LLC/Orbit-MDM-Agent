@@ -5,10 +5,12 @@
   macOS won't let even a root daemon grant itself the privacy permissions the
   agent needs — Screen Recording (the built-in remote desktop), Full Disk Access
   (complete inventory) and Accessibility (remote keyboard and mouse, once it
-  lands). The only silent way to grant them is a configuration profile like this
-  one, pushed by your MDM (Orbit MDM, Jamf, Intune, Kandji…); otherwise the
-  person at the Mac grants them by hand (the menu-bar app's "Fix…" buttons open
-  the right pane), and Screen Recording needs them to be signed in.
+  lands). Pushed by your MDM (Orbit MDM, Jamf, Intune, Kandji…), this profile
+  grants Full Disk Access and Accessibility silently (Accessibility only through
+  macOS 26; macOS 27 makes the person confirm it). No profile can grant Screen
+  Recording silently — macOS always makes the person approve it while signed in
+  (the menu-bar app's "Fix…" buttons open the right pane). Without an MDM the
+  person grants every permission there by hand.
 
   Before deploying:
     1. Replace __TEAM_ID__ with the Apple Developer Team ID the agent is signed
@@ -17,7 +19,7 @@
     2. Give the top-level PayloadUUID and PayloadIdentifier your own values, and
        the same each time you update this profile.
   Verify the requirement string against a signed build with:
-    codesign -d -r- /Library/Orbit/orbit-agent
+    codesign -d -r- "/Library/Orbit/Orbit Agent Service.app"
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -40,6 +42,9 @@
       <key>PayloadDisplayName</key><string>Orbit agent TCC</string>
       <key>Services</key>
       <dict>
+        <!-- Screen Recording can't be granted silently by any profile; macOS
+             makes the person approve it. Allow here only lets a standard
+             (non-admin) user approve it without an admin password. -->
         <key>ScreenCapture</key>
         <array>
           <dict>

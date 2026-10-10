@@ -132,6 +132,7 @@ func Uninstall() error {
 		bootoutMenuAgent()
 		_ = os.Remove(menuPlistPath)
 		_ = os.RemoveAll(menuAppPath)
+		removeServiceBundle()
 		_ = os.Remove("/Library/Orbit/status.json")
 		return os.Remove(plistPath)
 	}

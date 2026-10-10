@@ -137,6 +137,11 @@ func startService(noService bool) error {
 	if err != nil {
 		return err
 	}
+	// On macOS the binary sits inside an .app bundle; give the bundle its name
+	// and icon (a no-op elsewhere) so the privacy panes show "Orbit Agent".
+	if err := service.InstallServiceBundle(Version); err != nil {
+		return fmt.Errorf("couldn't write the service bundle: %w", err)
+	}
 	if err := service.Install(binary); err != nil {
 		return fmt.Errorf("couldn't install the service: %w", err)
 	}

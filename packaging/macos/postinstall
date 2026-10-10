@@ -4,7 +4,7 @@
 # the server and token come from the ai.orbit.agent managed preferences a
 # configuration profile sets). What it says goes to the install log.
 log=/var/log/orbit-agent-install.log
-/Library/Orbit/orbit-agent install --package >>"$log" 2>&1
+"/Library/Orbit/Orbit Agent Service.app/Contents/MacOS/orbit-agent" install --package >>"$log" 2>&1
 status=$?
 [ "$status" -eq 0 ] || echo "orbit-agent install --package failed ($status); see $log" >&2
 

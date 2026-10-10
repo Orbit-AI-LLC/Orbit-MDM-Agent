@@ -1,8 +1,8 @@
 #!/bin/sh
 # Build dist/Orbit-Agent-macOS.pkg from the darwin builds in dist
-# (scripts/build_agent.sh first): one universal binary at
-# /Library/Orbit/orbit-agent, where `orbit-agent install` keeps it, and a
-# postinstall that runs `orbit-agent install --package` (README.md).
+# (scripts/build_agent.sh first): one universal binary inside
+# "/Library/Orbit/Orbit Agent Service.app", where `orbit-agent install` keeps it,
+# and a postinstall that runs `orbit-agent install --package` (README.md).
 #
 # Signed when these are set (the agent workflow sets them from secrets), and
 # notarized and stapled when the Apple ID ones are set too:
@@ -29,18 +29,33 @@ for arch in arm64 amd64; do
   fi
 done
 mkdir -p "$work/root/Library/Orbit" "$work/scripts"
-lipo -create -output "$work/root/Library/Orbit/orbit-agent" "$dist/orbit-agent-darwin-arm64" "$dist/orbit-agent-darwin-amd64"
-chmod 755 "$work/root/Library/Orbit/orbit-agent"
+
+# The service, universal, inside Orbit Agent Service.app so Full Disk Access,
+# Screen Recording and Accessibility list it as "Orbit Agent" with the Orbit logo
+# instead of a bare Unix tool with a terminal icon. Its own bundle name keeps it
+# from colliding on disk with the menu-bar Orbit Agent.app below. serviceInfoPlist
+# in internal/service/menu_darwin.go writes the same bundle when the agent
+# installs itself (fresh curl installs, and self-healing); keep the two in step.
+svc="$work/root/Library/Orbit/Orbit Agent Service.app"
+mkdir -p "$svc/Contents/MacOS" "$svc/Contents/Resources"
+lipo -create -output "$svc/Contents/MacOS/orbit-agent" "$dist/orbit-agent-darwin-arm64" "$dist/orbit-agent-darwin-amd64"
+chmod 755 "$svc/Contents/MacOS/orbit-agent"
+cp internal/service/OrbitAgent.icns "$svc/Contents/Resources/OrbitAgent.icns"
+sed "s/__VERSION__/$VERSION/g" packaging/macos/ServiceInfo.plist > "$svc/Contents/Info.plist"
 if [ -n "${MAC_APP_IDENTITY:-}" ]; then
-  codesign --verify --strict "$work/root/Library/Orbit/orbit-agent"
+  # Sign the bundle as ai.orbit.agent, the identifier the PPPC profile keys on.
+  # shellcheck disable=SC2046
+  codesign --force --options runtime --timestamp --identifier ai.orbit.agent $(keychain) --sign "$MAC_APP_IDENTITY" "$svc"
+  codesign --verify --strict "$svc"
 fi
 
 # The menu-bar app (menubar/macos), universal, in Orbit Agent.app beside the
-# binary, loaded as a per-user LaunchAgent so it runs in each GUI session.
+# service bundle, loaded as a per-user LaunchAgent so it runs in each GUI session.
 swiftc="$(xcrun -f swiftc)"
 sdk="$(xcrun --show-sdk-path)"
 app="$work/root/Library/Orbit/Orbit Agent.app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+cp internal/service/OrbitAgent.icns "$app/Contents/Resources/OrbitAgent.icns"
 for arch in arm64 x86_64; do
   "$swiftc" -sdk "$sdk" -O -target "$arch-apple-macos12" -o "$work/menu-$arch" menubar/macos/OrbitAgentMenu.swift
 done

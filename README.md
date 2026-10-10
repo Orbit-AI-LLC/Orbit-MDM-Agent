@@ -24,7 +24,7 @@ configuration (readable by root or SYSTEM only) and installs the service:
 | | Service | Binary | Configuration |
 | --- | --- | --- | --- |
 | Windows | `OrbitAgent` (automatic, restarted on failure) | `C:\Program Files\Orbit\Agent\orbit-agent.exe` | `C:\ProgramData\Orbit\Agent\config.json` |
-| macOS | launch daemon `ai.orbit.agent` | `/Library/Orbit/orbit-agent` | `/Library/Application Support/Orbit Agent/config.json` |
+| macOS | launch daemon `ai.orbit.agent` | `/Library/Orbit/Orbit Agent Service.app` (binary at `Contents/MacOS/orbit-agent`) | `/Library/Application Support/Orbit Agent/config.json` |
 | Linux | systemd unit `orbit-agent` | `/usr/local/bin/orbit-agent` | `/etc/orbit-agent/config.json`, state in `/var/lib/orbit-agent` |
 
 `orbit-agent status`, `orbit-agent once` (check in and run what comes back)
@@ -32,6 +32,15 @@ and `orbit-agent uninstall` do what they say. `ORBIT_AGENT_HOME` moves the
 configuration and state (for tests, and to run a second copy beside the
 service); `install --no-service` enrolls without copying the binary or
 installing the service.
+
+On macOS the service binary lives inside an `.app` bundle (`Orbit Agent
+Service.app`, identifier `ai.orbit.agent`) so that Full Disk Access, Screen
+Recording and Accessibility list it as **Orbit Agent** with the Orbit logo
+rather than as a bare `orbit-agent` Unix tool with a terminal icon. `install`
+writes the bundle's metadata (`internal/service`), self-updates swap only the
+binary inside it, and the bundle's icon is `scripts/build_icon.sh`'s output,
+embedded in the agent and shared with the menu-bar app below. An upgrade from an
+older agent moves it off the bare `/Library/Orbit/orbit-agent` path.
 
 ### Through an MDM
 
@@ -93,7 +102,12 @@ pane) and the organization's help desk. It holds no secrets and does nothing
 privileged — it only reads the status file the service writes each check-in
 (`/Library/Orbit/status.json`, `internal/status/`). It's an accessory
 `Orbit Agent.app` in `/Library/Orbit`, run in each GUI session by a per-user
-LaunchAgent (`ai.orbit.agent.menu`).
+LaunchAgent (`ai.orbit.agent.menu`). Its status-bar icon is the Orbit RMM mark
+(a monitor with a heartbeat, drawn from `scripts/orbitmark.swift`), a template
+image macOS inks for light or dark and that turns amber or red only when
+something needs attention — not a generic symbol. The bundle carries the same
+Orbit icon as the service (`scripts/build_icon.sh`), so it shows the logo in
+Login Items too.
 
 The `.pkg` lays the app down and the postinstall starts it. But an agent updates
 itself by replacing only its binary — and the binary that runs an update is the
