@@ -158,9 +158,17 @@ Accessibility without re-asking. An **unsigned or ad-hoc** build is keyed by the
 and code-hash instead, so every update looks like a new, undetermined app: the
 old grant drops and macOS lists the binary by a fallback name (a version string,
 a generic icon). Ship signed, notarized releases (`scripts/package_agent_macos.sh`
-with `MAC_APP_IDENTITY` set) so permissions persist; with an MDM, push
-`packaging/macos/Orbit-Agent-PPPC.mobileconfig` to pre-grant them by that same
-requirement.
+with `MAC_APP_IDENTITY` set) so permissions persist.
+
+**With an MDM, pre-grant the permissions by profile and the person never touches
+System Settings.** Orbit MDM does this automatically: it pushes the same PPPC
+payload inside the policy profile it sends every managed Mac (`apple_payloads` in
+`apps/policies/compile.py` in the Orbit MDM server), granting Full Disk Access and
+Accessibility silently by the agent's code requirement — so an Orbit-managed Mac
+reports them granted with no prompt and no Settings trip. For a third-party MDM
+(Jamf, Intune, Kandji…) push `packaging/macos/Orbit-Agent-PPPC.mobileconfig`, which
+carries the same grant. Screen Recording still can't be granted silently by any
+profile — macOS always makes the person approve that one.
 
 ## The pulse channel
 

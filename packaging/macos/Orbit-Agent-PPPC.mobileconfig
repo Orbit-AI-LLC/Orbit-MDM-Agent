@@ -5,19 +5,24 @@
   macOS won't let even a root daemon grant itself the privacy permissions the
   agent needs — Screen Recording (the built-in remote desktop), Full Disk Access
   (complete inventory) and Accessibility (remote keyboard and mouse, once it
-  lands). Pushed by your MDM (Orbit MDM, Jamf, Intune, Kandji…), this profile
-  grants Full Disk Access and Accessibility silently (Accessibility only through
-  macOS 26; macOS 27 makes the person confirm it). No profile can grant Screen
-  Recording silently — macOS always makes the person approve it while signed in
-  (the menu-bar app's "Fix…" buttons open the right pane). Without an MDM the
-  person grants every permission there by hand.
+  lands). Pushed by your MDM, this profile grants Full Disk Access and
+  Accessibility silently (Accessibility only through macOS 26; macOS 27 makes the
+  person confirm it). No profile can grant Screen Recording silently — macOS
+  always makes the person approve it while signed in (the menu-bar app's "Fix…"
+  buttons open the right pane). Without an MDM the person grants every permission
+  there by hand.
 
-  Before deploying:
-    1. Replace __TEAM_ID__ with the Apple Developer Team ID the agent is signed
-       with (the OU of its Developer ID certificate). The agent's code-signing
-       identifier is ai.orbit.agent (set in scripts/package_agent_macos.sh).
-    2. Give the top-level PayloadUUID and PayloadIdentifier your own values, and
-       the same each time you update this profile.
+  This standalone profile is for a third-party MDM (Jamf, Intune, Kandji…) or a
+  by-hand install. Orbit MDM grants these itself — it pushes the same PPPC payload
+  inside its policy profile (apple_payloads in apps/policies/compile.py in the
+  Orbit MDM server), so an Orbit-managed Mac needs nothing here.
+
+  The Team ID below (4H6947R87X) is the OU of the Developer ID certificate the
+  agent is signed with; scripts/package_agent_macos.sh signs it as ai.orbit.agent.
+  If you re-sign under a different Apple Developer account, replace the Team ID in
+  all three CodeRequirement strings and keep it in step with AGENT_TEAM_ID in the
+  Orbit MDM server. Give the PayloadUUIDs your own values when you deploy (and the
+  same ones each time you update this profile).
   Verify the requirement string against a signed build with:
     codesign -d -r- "/Library/Orbit/Orbit Agent Service.app"
 -->
@@ -27,7 +32,7 @@
   <key>PayloadType</key><string>Configuration</string>
   <key>PayloadVersion</key><integer>1</integer>
   <key>PayloadIdentifier</key><string>ai.orbit.agent.pppc</string>
-  <key>PayloadUUID</key><string>5F2B0C40-0000-4000-A000-ORBITAGENTPPPC</string>
+  <key>PayloadUUID</key><string>8C7B04A8-8265-4A17-AED5-570CB53E62C3</string>
   <key>PayloadDisplayName</key><string>Orbit agent privacy permissions</string>
   <key>PayloadDescription</key><string>Grants the Orbit RMM agent Screen Recording, Full Disk Access and Accessibility.</string>
   <key>PayloadOrganization</key><string>Orbit</string>
@@ -38,7 +43,7 @@
       <key>PayloadType</key><string>com.apple.TCC.configuration-profile-policy</string>
       <key>PayloadVersion</key><integer>1</integer>
       <key>PayloadIdentifier</key><string>ai.orbit.agent.pppc.tcc</string>
-      <key>PayloadUUID</key><string>5F2B0C40-0001-4000-A000-ORBITAGENTPPPC</string>
+      <key>PayloadUUID</key><string>71C21B0F-DDDC-4CE2-9A71-3C9AD58399D1</string>
       <key>PayloadDisplayName</key><string>Orbit agent TCC</string>
       <key>Services</key>
       <dict>
@@ -50,7 +55,7 @@
           <dict>
             <key>Identifier</key><string>ai.orbit.agent</string>
             <key>IdentifierType</key><string>bundleID</string>
-            <key>CodeRequirement</key><string>identifier "ai.orbit.agent" and anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__"</string>
+            <key>CodeRequirement</key><string>identifier "ai.orbit.agent" and anchor apple generic and certificate leaf[subject.OU] = "4H6947R87X"</string>
             <key>Authorization</key><string>Allow</string>
           </dict>
         </array>
@@ -59,7 +64,7 @@
           <dict>
             <key>Identifier</key><string>ai.orbit.agent</string>
             <key>IdentifierType</key><string>bundleID</string>
-            <key>CodeRequirement</key><string>identifier "ai.orbit.agent" and anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__"</string>
+            <key>CodeRequirement</key><string>identifier "ai.orbit.agent" and anchor apple generic and certificate leaf[subject.OU] = "4H6947R87X"</string>
             <key>Allowed</key><true/>
           </dict>
         </array>
@@ -68,7 +73,7 @@
           <dict>
             <key>Identifier</key><string>ai.orbit.agent</string>
             <key>IdentifierType</key><string>bundleID</string>
-            <key>CodeRequirement</key><string>identifier "ai.orbit.agent" and anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__"</string>
+            <key>CodeRequirement</key><string>identifier "ai.orbit.agent" and anchor apple generic and certificate leaf[subject.OU] = "4H6947R87X"</string>
             <key>Allowed</key><true/>
           </dict>
         </array>
