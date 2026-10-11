@@ -572,6 +572,9 @@ func (a *Agent) ensureMenuApp(ctx context.Context) {
 // never disturbs a permission that's already granted (and knows which ones macOS
 // can even be asked for — Full Disk Access has no prompt, so the menu-bar app takes
 // the person to Settings for that), so this quietly does nothing on a healthy Mac.
+// It also watches the privacy database and, when a permission is granted while the
+// agent is running, restarts so the new grant takes effect at once (a running
+// process keeps its old access until it relaunches).
 // macOS-only; a no-op elsewhere, where the agent already has the rights it needs.
 func (a *Agent) watchPermissions(ctx context.Context) {
 	if runtime.GOOS != "darwin" {
@@ -579,8 +582,12 @@ func (a *Agent) watchPermissions(ctx context.Context) {
 	}
 	// Ask once at startup: a login before the service started, or the restart a
 	// self-update just did, both land here.
+	started := time.Now()
 	system.RequestPermissions(ctx)
 	lastUser := system.ConsoleUser()
+	// The privacy database's modification time at startup; a change means someone
+	// granted or revoked a permission in System Settings since (see below).
+	tccSeen := system.TCCModTime()
 	// A tick far longer than the interval means the Mac was asleep in between.
 	const interval = 30 * time.Second
 	last := time.Now()
@@ -599,8 +606,38 @@ func (a *Agent) watchPermissions(ctx context.Context) {
 			if woke || newLogin {
 				system.RequestPermissions(ctx)
 			}
+			// When someone grants a permission in System Settings, the privacy
+			// database changes — but a process that's already running keeps its old
+			// access until it relaunches, so the agent would keep reporting the
+			// permission as off. So if the database has changed and the agent still
+			// lacks something it needs, restart to pick up the new grant. The
+			// agent's own probing doesn't touch the database, so this won't chain;
+			// the uptime guard is a belt against an unforeseen restart loop.
+			mtime := system.TCCModTime()
+			if mtime.Equal(tccSeen) || time.Since(started) < time.Minute {
+				continue
+			}
+			tccSeen = mtime
+			if a.missingPermission(ctx) {
+				a.Log.Printf("a privacy permission changed in System Settings; restarting to apply it")
+				_ = service.Restart()
+				return
+			}
 		}
 	}
+}
+
+// missingPermission reports whether any macOS privacy permission the agent tracks
+// is not granted, so restarting into a fresh TCC decision could pick up a grant.
+// It covers every permission (Full Disk Access, Screen Recording, Accessibility):
+// whichever one the person grants, the agent restarts to apply it.
+func (a *Agent) missingPermission(ctx context.Context) bool {
+	for _, state := range system.Permissions(ctx) {
+		if state != status.Granted {
+			return true
+		}
+	}
+	return false
 }
 
 // installMenuApp downloads the menu-bar binary from a release (base is that

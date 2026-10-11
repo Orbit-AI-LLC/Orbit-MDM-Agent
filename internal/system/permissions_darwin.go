@@ -131,6 +131,22 @@ func RequestPermissions(ctx context.Context) {
 	}
 }
 
+// Permissions reports whether the agent currently has each macOS privacy
+// permission ("granted", "denied" or "unknown"); see permissions.
+func Permissions(ctx context.Context) map[string]string { return permissions(ctx) }
+
+// TCCModTime is when the system privacy database last changed — i.e. when someone
+// last granted or revoked a permission in System Settings. Reading its contents
+// needs Full Disk Access, but reading its modification time does not, so the agent
+// can watch it to notice a grant and restart into it: a running process keeps its
+// old TCC decision until it relaunches. Zero when it can't be read.
+func TCCModTime() time.Time {
+	if fi, err := os.Stat(tccDB); err == nil {
+		return fi.ModTime()
+	}
+	return time.Time{}
+}
+
 // requestScreenRecording takes a throwaway screen capture to raise macOS's Screen
 // Recording prompt (see RequestPermissions).
 func requestScreenRecording(ctx context.Context) {

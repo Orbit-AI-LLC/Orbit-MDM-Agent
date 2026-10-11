@@ -2,12 +2,21 @@
 
 package system
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // permissions is macOS-only (privacy permissions, TCC). Elsewhere the agent runs
 // with the rights it needs (SYSTEM on Windows, root on Linux), so there is
 // nothing to report.
 func permissions(ctx context.Context) map[string]string { return nil }
+
+// Permissions is macOS-only; elsewhere the agent already has the rights it needs.
+func Permissions(ctx context.Context) map[string]string { return nil }
+
+// TCCModTime is macOS-only (the privacy database); zero elsewhere.
+func TCCModTime() time.Time { return time.Time{} }
 
 // RequestPermissions is macOS-only (privacy permissions, TCC); elsewhere the
 // agent already has the rights it needs.
