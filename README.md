@@ -236,10 +236,14 @@ WiX), and **on every push to `main` tags and publishes a release**,
 `VERSION` when it has been raised there (a major or minor release;
 `scripts/next_version.sh`). Pushing a tag `agent-v<version>` by hand releases
 that version instead. With its secrets set (listed at the top of the workflow)
-the macOS binaries are signed with a Developer ID and the `.pkg` with a
-Developer ID Installer certificate and notarized; the Windows binaries and
-`.msi` files are Authenticode-signed. Without them everything is built
-unsigned, with a warning. The macOS `.pkg` build also publishes
+the macOS binaries and app bundles are signed with a Developer ID **Application**
+certificate — the same cert the other Orbit apps use, and the one Full Disk
+Access and the PPPC profile key on, so this alone is what makes permissions
+persist across updates. The Developer ID **Installer** certificate is separate
+and optional: it signs and notarizes the `.pkg`, but the binaries are signed with
+the Application cert whether or not it's set. The Windows binaries and `.msi`
+files are Authenticode-signed. Without a certificate the matching artifacts are
+built unsigned, with a warning. The macOS `.pkg` build also publishes
 `orbit-agent-menu-darwin`, the universal menu-bar binary agents refresh the
 menu-bar app from. `SHA256SUMS` (every published file) and `releases.json` (the
 version and each agent binary's URL and SHA-256; not the menu binary, which

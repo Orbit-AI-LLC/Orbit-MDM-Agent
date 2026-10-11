@@ -9,8 +9,14 @@
 #
 # Signing needs these repository secrets. Without them everything still builds
 # and publishes, unsigned, with a warning:
-#   MACOS_CERTIFICATE_P12, MACOS_CERTIFICATE_PASSWORD  a "Developer ID Application" .p12, base64: the macOS binaries
-#   MACOS_INSTALLER_P12, MACOS_INSTALLER_PASSWORD      a "Developer ID Installer" .p12, base64: the .pkg
+#   MACOS_CERTIFICATE_P12, MACOS_CERTIFICATE_PASSWORD  a "Developer ID Application" .p12, base64: the macOS
+#       binaries and the Orbit Agent (Service).app bundles. This one matters most: without a stable Developer
+#       ID identity, macOS Full Disk Access and the PPPC profile stop matching the agent after every update
+#       (TCC pins an ad-hoc binary to its cdhash, which changes each build). This is the same cert the other
+#       Orbit apps (Mail, Chat, AI) sign with, so the Application cert alone is enough here too.
+#   MACOS_INSTALLER_P12, MACOS_INSTALLER_PASSWORD      a "Developer ID Installer" .p12, base64: signs and
+#       notarizes Orbit-Agent-macOS.pkg. Optional and independent of the above — the binaries are signed with
+#       the Application cert whether or not this is set; only the .pkg stays unsigned without it.
 #   APPLE_TEAM_ID, NOTARY_APPLE_ID, NOTARY_PASSWORD     notarizing the .pkg (an app-specific password)
 #   WINDOWS_CERTIFICATE_PFX, WINDOWS_CERTIFICATE_PASSWORD  an Authenticode code-signing .pfx, base64: the .exe and .msi files
 # Signing changes the binaries, so SHA256SUMS and releases.json are written
@@ -76,11 +82,14 @@ jobs:
         with:
           name: agent-binaries
           path: dist
-      - name: Unsigned
-        if: env.MACOS_CERTIFICATE_P12 == '' || env.MACOS_INSTALLER_P12 == ''
-        run: echo "::warning::The macOS agent and Orbit-Agent-macOS.pkg are unsigned. Set the MACOS_* secrets (see the top of .github/workflows/agent.yml) to sign them."
+      - name: Unsigned binaries
+        if: env.MACOS_CERTIFICATE_P12 == ''
+        run: echo "::warning::The macOS agent is unsigned (ad hoc). Full Disk Access and the PPPC profile won't survive updates until it's Developer ID signed. Set MACOS_CERTIFICATE_P12/MACOS_CERTIFICATE_PASSWORD (see the top of .github/workflows/agent.yml) — the same Application cert the other Orbit apps use."
+      - name: Unsigned package
+        if: env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_INSTALLER_P12 == ''
+        run: echo "::warning::Orbit-Agent-macOS.pkg is unsigned and not notarized (the agent binaries are Developer ID signed). Set MACOS_INSTALLER_P12/MACOS_INSTALLER_PASSWORD to sign and notarize the .pkg."
       - name: Signing keychain
-        if: env.MACOS_CERTIFICATE_P12 != '' && env.MACOS_INSTALLER_P12 != ''
+        if: env.MACOS_CERTIFICATE_P12 != ''
         run: |
           set -euo pipefail
           keychain="$RUNNER_TEMP/build.keychain-db"
@@ -88,18 +97,23 @@ jobs:
           security create-keychain -p "$password" "$keychain"
           security set-keychain-settings -lut 3600 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
+          # The Developer ID Application cert signs the binaries and app bundles. This is
+          # what Full Disk Access and the PPPC profile key on, so it alone is enough.
           echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/app.p12"
-          echo "$MACOS_INSTALLER_P12" | base64 --decode > "$RUNNER_TEMP/installer.p12"
           security import "$RUNNER_TEMP/app.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security import "$RUNNER_TEMP/installer.p12" -k "$keychain" -P "$MACOS_INSTALLER_PASSWORD" -T /usr/bin/productbuild -T /usr/bin/productsign
+          rm -f "$RUNNER_TEMP/app.p12"
+          echo "MAC_APP_IDENTITY=Developer ID Application" >> "$GITHUB_ENV"
+          # The Developer ID Installer cert is optional: it only signs (and lets us
+          # notarize) the .pkg. The binaries above are signed regardless.
+          if [ -n "${MACOS_INSTALLER_P12:-}" ]; then
+            echo "$MACOS_INSTALLER_P12" | base64 --decode > "$RUNNER_TEMP/installer.p12"
+            security import "$RUNNER_TEMP/installer.p12" -k "$keychain" -P "$MACOS_INSTALLER_PASSWORD" -T /usr/bin/productbuild -T /usr/bin/productsign
+            rm -f "$RUNNER_TEMP/installer.p12"
+            echo "MAC_INSTALLER_IDENTITY=Developer ID Installer" >> "$GITHUB_ENV"
+          fi
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-          rm -f "$RUNNER_TEMP/app.p12" "$RUNNER_TEMP/installer.p12"
-          {
-            echo "KEYCHAIN=$keychain"
-            echo "MAC_APP_IDENTITY=Developer ID Application"
-            echo "MAC_INSTALLER_IDENTITY=Developer ID Installer"
-          } >> "$GITHUB_ENV"
+          echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
       - name: Package
         run: |
           chmod +x dist/orbit-agent-darwin-*
