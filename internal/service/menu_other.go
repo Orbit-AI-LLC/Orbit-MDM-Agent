@@ -19,3 +19,8 @@ func MenuAppVersion() string { return "" }
 func bootstrapMenuAgent() {}
 
 func removeServiceBundle() {}
+
+// InstallDesktopAgent is a no-op off macOS (the desktop helper is macOS-only).
+func InstallDesktopAgent() error { return nil }
+
+func bootoutDesktopAgent() {}

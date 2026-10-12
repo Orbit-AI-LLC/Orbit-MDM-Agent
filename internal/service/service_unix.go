@@ -26,6 +26,13 @@ const menuLabel = "ai.orbit.agent.menu"
 const menuPlistPath = "/Library/LaunchAgents/" + menuLabel + ".plist"
 const menuAppPath = "/Library/Orbit/Orbit Agent.app"
 
+// The remote desktop's screen capture runs as its own per-user LaunchAgent (the
+// signed service binary with `desktop-helper`), so Screen Recording can be
+// granted in the GUI session without an MDM. macOS only; the plist and bootstrap
+// are in menu_darwin.go.
+const desktopLabel = "ai.orbit.agent.desktop"
+const desktopPlistPath = "/Library/LaunchAgents/" + desktopLabel + ".plist"
+
 func unit(binary string) string {
 	return fmt.Sprintf(`[Unit]
 Description=Orbit RMM agent
@@ -105,6 +112,10 @@ func Install(binary string) error {
 		if _, err := os.Stat(menuAppPath); err == nil {
 			bootstrapMenuAgent()
 		}
+		// The per-user desktop helper (remote desktop capture, where Screen
+		// Recording is granted without an MDM). Best-effort: a failure here doesn't
+		// stop the service from running.
+		_ = InstallDesktopAgent()
 		return nil
 	}
 	if err := os.WriteFile(unitPath, []byte(unit(binary)), 0o644); err != nil {
@@ -156,6 +167,8 @@ func Uninstall() error {
 		bootoutMenuAgent()
 		_ = os.Remove(menuPlistPath)
 		_ = os.RemoveAll(menuAppPath)
+		bootoutDesktopAgent()
+		_ = os.Remove(desktopPlistPath)
 		removeServiceBundle()
 		_ = os.Remove("/Library/Orbit/status.json")
 		return os.Remove(plistPath)

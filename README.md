@@ -131,11 +131,22 @@ the agent does too:
 
 - **Screen Recording** has a system prompt — but macOS only raises it when a
   process actually *attempts a capture* while someone is signed in, and only once
-  per decision; reading the state never asks. So the agent takes a throwaway
-  capture to raise it (`internal/system`'s `RequestPermissions`).
+  per decision; reading the state never asks. Crucially, macOS also only lets a
+  process **in the signed-in person's GUI session** be granted Screen Recording and
+  capture the screen — a background root daemon can't. So the remote desktop's
+  capture runs in a **per-user LaunchAgent**, `ai.orbit.agent.desktop`, the same
+  signed binary run with `desktop-helper` (`internal/remote/desktophelper_darwin.go`);
+  it hosts the built-in VNC server on a unix socket that the root daemon dials
+  (`dialDesktop` in `internal/remote/desktop_other.go`), and it takes a throwaway
+  capture to raise the prompt. **This is what lets Screen Recording be granted
+  without an MDM** — the person clicks the menu-bar app's **Fix…** and toggles it
+  on. Reusing the service's `ai.orbit.agent` identity means a managed Mac's PPPC
+  profile still grants it silently, with no second bundle to sign.
 - **Accessibility** also has a prompt, but the remote desktop is view-only today,
-  so the agent won't ask for a permission it wouldn't use yet; the same path turns
-  it on when the feature that needs it lands.
+  so the agent won't ask for a permission it wouldn't use yet. When remote control
+  (keyboard and mouse injection) lands it will run in the same user-session desktop
+  helper, which can raise the Accessibility prompt in the GUI session — so, like
+  Screen Recording, it is grantable without an MDM.
 - **Full Disk Access** has *no prompt at all* — macOS never asks for it; a program
   just silently can't read protected paths. The only way to ask is to open its
   System Settings pane, which the menu-bar app does.

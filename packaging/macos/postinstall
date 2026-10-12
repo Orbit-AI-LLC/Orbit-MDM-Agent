@@ -8,14 +8,18 @@ log=/var/log/orbit-agent-install.log
 status=$?
 [ "$status" -eq 0 ] || echo "orbit-agent install --package failed ($status); see $log" >&2
 
-# Start the menu-bar app now for whoever is signed in; otherwise the LaunchAgent
-# in /Library/LaunchAgents loads it at the next login.
+# Start the per-user LaunchAgents now for whoever is signed in; otherwise the
+# plists in /Library/LaunchAgents load them at the next login. These are the
+# menu-bar app and the remote-desktop helper (which holds Screen Recording, so it
+# must run in the GUI session — that's what lets it be granted without an MDM).
 user=$(/usr/bin/stat -f%Su /dev/console 2>/dev/null)
 if [ -n "$user" ] && [ "$user" != "root" ]; then
   uid=$(/usr/bin/id -u "$user" 2>/dev/null)
   if [ -n "$uid" ]; then
-    /bin/launchctl bootout "gui/$uid/ai.orbit.agent.menu" >/dev/null 2>&1
-    /bin/launchctl bootstrap "gui/$uid" /Library/LaunchAgents/ai.orbit.agent.menu.plist >>"$log" 2>&1
+    for agent in ai.orbit.agent.menu ai.orbit.agent.desktop; do
+      /bin/launchctl bootout "gui/$uid/$agent" >/dev/null 2>&1
+      /bin/launchctl bootstrap "gui/$uid" "/Library/LaunchAgents/$agent.plist" >>"$log" 2>&1
+    done
   fi
 fi
 

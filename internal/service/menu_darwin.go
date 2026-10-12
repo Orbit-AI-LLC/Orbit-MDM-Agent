@@ -248,6 +248,60 @@ func bootstrapMenuAgent() {
 	_ = exec.Command("launchctl", "bootstrap", "gui/"+uid, menuPlistPath).Run()
 }
 
+// The remote desktop's screen capture runs as a per-user LaunchAgent in the
+// signed-in person's GUI session (not the root daemon), because macOS only lets a
+// process in an active session be granted Screen Recording and raise its prompt —
+// which is what lets the agent work without an MDM. It runs the same signed
+// service binary with `desktop-helper`, so it keeps the ai.orbit.agent identity
+// (the daemon dials it; see internal/remote/desktophelper_darwin.go). Its label
+// and plist path are in service_unix.go, beside the menu agent's.
+//
+// desktopLaunchAgentPlist runs the service binary in desktop-helper mode in the
+// GUI session (Aqua), restarted on failure. The program path is serviceExecPath.
+const desktopLaunchAgentPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>` + desktopLabel + `</string>
+  <key>ProgramArguments</key>
+  <array><string>` + serviceExecPath + `</string><string>desktop-helper</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+</dict>
+</plist>
+`
+
+// InstallDesktopAgent writes the desktop helper's LaunchAgent and loads it for
+// whoever is signed in. Safe to run on every install; the helper is the same
+// binary the service bundle already holds, so there's nothing else to lay down.
+func InstallDesktopAgent() error {
+	if err := os.WriteFile(desktopPlistPath, []byte(desktopLaunchAgentPlist), 0o644); err != nil {
+		return err
+	}
+	bootstrapDesktopAgent()
+	return nil
+}
+
+func bootstrapDesktopAgent() {
+	uid, ok := consoleUID()
+	if !ok {
+		return
+	}
+	_ = exec.Command("launchctl", "bootout", "gui/"+uid+"/"+desktopLabel).Run()
+	_ = exec.Command("launchctl", "bootstrap", "gui/"+uid, desktopPlistPath).Run()
+}
+
+// bootoutDesktopAgent stops the desktop helper in the signed-in person's session,
+// so it goes away with the rest of the agent on uninstall.
+func bootoutDesktopAgent() {
+	uid, ok := consoleUID()
+	if !ok {
+		return
+	}
+	_ = exec.Command("launchctl", "bootout", "gui/"+uid+"/"+desktopLabel).Run()
+}
+
 func copyFile(src, dst string, mode os.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {

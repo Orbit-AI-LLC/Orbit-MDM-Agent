@@ -25,6 +25,7 @@ import (
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/agent"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/api"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/config"
+	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/remote"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/service"
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/system"
 )
@@ -44,6 +45,8 @@ func main() {
 		err = install(os.Args[2:], logger)
 	case "run":
 		err = run(logger)
+	case "desktop-helper":
+		err = desktopHelper(logger)
 	case "once":
 		err = once(logger)
 	case "status":
@@ -212,6 +215,20 @@ func load(logger *log.Logger) (*agent.Agent, error) {
 		return nil, err
 	}
 	return agent.New(cfg, Version, logger), nil
+}
+
+// desktopHelper runs the per-user, GUI-session half of the remote desktop: it
+// hosts the screen capture the root daemon dials, and holds Screen Recording,
+// which (unlike the daemon) a process in the session can be granted without an
+// MDM. The ai.orbit.agent.desktop LaunchAgent runs this.
+func desktopHelper(logger *log.Logger) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	err := remote.RunDesktopHelper(ctx, logger)
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
 func run(logger *log.Logger) error {

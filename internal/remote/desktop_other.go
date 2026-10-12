@@ -17,6 +17,13 @@ func dialDesktop(ctx context.Context, opt Options) (net.Conn, func(), error) {
 	if conn := dialLocal(ctx, []int{5900, 5901, 5902}); conn != nil {
 		return conn, func() {}, nil
 	}
+	// The per-user desktop helper, where screen capture runs in the signed-in
+	// person's GUI session — the only place macOS lets Screen Recording be granted
+	// without an MDM. Preferred over the daemon's own in-process capture below,
+	// which recent macOS blocks for a process that isn't in an active session.
+	if conn := dialDesktopHelper(ctx); conn != nil {
+		return conn, func() {}, nil
+	}
 	screen, err := builtInScreen()
 	if err == nil {
 		client, server := net.Pipe()
