@@ -240,12 +240,21 @@ func removeServiceBundle() {
 // session, so a new version shows up without a logout. It's a no-op at the login
 // window; the LaunchAgent then loads it at the next login.
 func bootstrapMenuAgent() {
-	uid, ok := consoleUID()
-	if !ok {
-		return
+	if uid, ok := consoleUID(); ok {
+		bootstrapUserAgent(uid, menuLabel, menuPlistPath)
 	}
-	_ = exec.Command("launchctl", "bootout", "gui/"+uid+"/"+menuLabel).Run()
-	_ = exec.Command("launchctl", "bootstrap", "gui/"+uid, menuPlistPath).Run()
+}
+
+// bootstrapUserAgent loads a per-user LaunchAgent into the signed-in person's GUI
+// session. It runs the bootstrap through `launchctl asuser`, inside the user's own
+// bootstrap context: bootstrapping a gui/<uid> domain directly from the root
+// service or the .pkg's installd context fails with EIO ("Bootstrap failed: 5")
+// because that context isn't in the session. It boots out any stale copy first
+// and kickstarts afterwards so the agent is actually running, not just loaded.
+func bootstrapUserAgent(uid, label, plistPath string) {
+	_ = exec.Command("launchctl", "asuser", uid, "launchctl", "bootout", "gui/"+uid+"/"+label).Run()
+	_ = exec.Command("launchctl", "asuser", uid, "launchctl", "bootstrap", "gui/"+uid, plistPath).Run()
+	_ = exec.Command("launchctl", "asuser", uid, "launchctl", "kickstart", "gui/"+uid+"/"+label).Run()
 }
 
 // The remote desktop's screen capture runs as a per-user LaunchAgent in the
@@ -284,22 +293,17 @@ func InstallDesktopAgent() error {
 }
 
 func bootstrapDesktopAgent() {
-	uid, ok := consoleUID()
-	if !ok {
-		return
+	if uid, ok := consoleUID(); ok {
+		bootstrapUserAgent(uid, desktopLabel, desktopPlistPath)
 	}
-	_ = exec.Command("launchctl", "bootout", "gui/"+uid+"/"+desktopLabel).Run()
-	_ = exec.Command("launchctl", "bootstrap", "gui/"+uid, desktopPlistPath).Run()
 }
 
 // bootoutDesktopAgent stops the desktop helper in the signed-in person's session,
 // so it goes away with the rest of the agent on uninstall.
 func bootoutDesktopAgent() {
-	uid, ok := consoleUID()
-	if !ok {
-		return
+	if uid, ok := consoleUID(); ok {
+		_ = exec.Command("launchctl", "asuser", uid, "launchctl", "bootout", "gui/"+uid+"/"+desktopLabel).Run()
 	}
-	_ = exec.Command("launchctl", "bootout", "gui/"+uid+"/"+desktopLabel).Run()
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {

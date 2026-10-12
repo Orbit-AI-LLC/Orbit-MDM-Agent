@@ -16,9 +16,13 @@ user=$(/usr/bin/stat -f%Su /dev/console 2>/dev/null)
 if [ -n "$user" ] && [ "$user" != "root" ]; then
   uid=$(/usr/bin/id -u "$user" 2>/dev/null)
   if [ -n "$uid" ]; then
+    # Load these through `launchctl asuser`, inside the user's own session: a
+    # direct `bootstrap gui/$uid` from the installer context fails with EIO
+    # ("Bootstrap failed: 5: Input/output error"). kickstart makes sure it runs.
     for agent in ai.orbit.agent.menu ai.orbit.agent.desktop; do
-      /bin/launchctl bootout "gui/$uid/$agent" >/dev/null 2>&1
-      /bin/launchctl bootstrap "gui/$uid" "/Library/LaunchAgents/$agent.plist" >>"$log" 2>&1
+      /bin/launchctl asuser "$uid" /bin/launchctl bootout "gui/$uid/$agent" >/dev/null 2>&1
+      /bin/launchctl asuser "$uid" /bin/launchctl bootstrap "gui/$uid" "/Library/LaunchAgents/$agent.plist" >>"$log" 2>&1
+      /bin/launchctl asuser "$uid" /bin/launchctl kickstart "gui/$uid/$agent" >/dev/null 2>&1
     done
   fi
 fi
