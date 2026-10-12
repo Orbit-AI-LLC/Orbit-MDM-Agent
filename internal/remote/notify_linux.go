@@ -27,5 +27,7 @@ func notifyViewing(by string) {
 		"DISPLAY="+session.display,
 		"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"+session.user+"/bus",
 		"XDG_RUNTIME_DIR=/run/user/"+session.user)
-	_ = cmd.Start()
+	if cmd.Start() == nil {
+		go func() { _ = cmd.Wait() }() // reap the helper so it doesn't linger as a zombie
+	}
 }

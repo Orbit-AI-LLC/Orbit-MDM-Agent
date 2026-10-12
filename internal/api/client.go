@@ -29,13 +29,15 @@ type Client struct {
 	HTTP    *http.Client
 }
 
-// New makes a client with sensible timeouts.
+// New makes a client. Each request sets its own deadline through the context in
+// do (30s–120s depending on the call), so the client has no overall Timeout: a
+// 60s cap here would cut the 90s long poll and the 120s result upload short.
 func New(server, secret, version string) *Client {
 	return &Client{
 		Server:  strings.TrimRight(server, "/"),
 		Secret:  secret,
 		Version: version,
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
+		HTTP:    &http.Client{},
 	}
 }
 

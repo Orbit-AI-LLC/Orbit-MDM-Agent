@@ -59,12 +59,25 @@ func TestSeenIsPersistedAndRefusesReplays(t *testing.T) {
 	public, private, _ := ed25519.GenerateKey(rand.Reader)
 	dir := t.TempDir()
 	seen := LoadSeen(dir)
-	if err := seen.Add("t1", time.Now()); err != nil {
-		t.Fatal(err)
+	if added, err := seen.Add("t1", time.Now()); err != nil || !added {
+		t.Fatalf("recording a new task: added=%v err=%v", added, err)
 	}
 	again := LoadSeen(dir)
 	sealed := seal(t, private, map[string]any{"id": "t1", "agent": "a1", "kind": "script"})
 	if _, err := Open(sealed, base64.StdEncoding.EncodeToString(public), "a1", time.Now(), again); !errors.Is(err, ErrReplayed) {
 		t.Fatalf("a task that already ran was accepted again: %v", err)
+	}
+}
+
+// TestAddClaimsEachIDOnce guards the replay fix: two copies of one task can both
+// pass Open's Has check before either runs, so Add must admit only the first.
+func TestAddReservesEachIDOnce(t *testing.T) {
+	seen := LoadSeen(t.TempDir())
+	now := time.Now()
+	if added, err := seen.Add("dup", now); err != nil || !added {
+		t.Fatalf("first copy should be admitted: added=%v err=%v", added, err)
+	}
+	if added, err := seen.Add("dup", now); err != nil || added {
+		t.Fatalf("second copy must be refused: added=%v err=%v", added, err)
 	}
 }

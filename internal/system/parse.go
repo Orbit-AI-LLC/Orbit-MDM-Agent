@@ -45,6 +45,13 @@ func CPUTimes(stat string) (idle, total uint64, ok bool) {
 			if err != nil {
 				return 0, 0, false
 			}
+			// Columns are user, nice, system, idle, iowait, irq, softirq, steal,
+			// guest, guest_nice. The kernel already counts guest inside user and
+			// guest_nice inside nice, so adding columns 8 and 9 would double-count
+			// them and understate how busy the CPU is.
+			if i == 8 || i == 9 {
+				continue
+			}
 			total += n
 			if i == 3 || i == 4 { // idle, iowait
 				idle += n

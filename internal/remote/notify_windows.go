@@ -11,5 +11,8 @@ func notifyViewing(by string) {
 	if who == "" {
 		who = "An administrator"
 	}
-	_ = exec.Command("msg", "*", "/TIME:20", who+" connected to this computer's screen through Orbit RMM.").Start()
+	cmd := exec.Command("msg", "*", "/TIME:20", who+" connected to this computer's screen through Orbit RMM.")
+	if cmd.Start() == nil {
+		go func() { _ = cmd.Wait() }() // reap the helper so its handle isn't leaked
+	}
 }

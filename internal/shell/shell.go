@@ -98,7 +98,15 @@ func Run(ctx context.Context, req Request) (*Output, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown shell %q", req.Shell)
 	}
-	dir, err := os.MkdirTemp("", "orbit-task-")
+	// A RunAs="user" script runs as the signed-in user, who must be able to reach
+	// and read it; the agent's own temp root can be unreadable to them (on macOS it
+	// is per-user and private to root), so put the script somewhere world-traversable
+	// and let asConsoleUser hand ownership over.
+	base := ""
+	if req.RunAs == "user" {
+		base = runAsTempBase()
+	}
+	dir, err := os.MkdirTemp(base, "orbit-task-")
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +124,7 @@ func Run(ctx context.Context, req Request) (*Output, error) {
 		return nil, err
 	}
 	if req.RunAs == "user" {
-		args, err = asConsoleUser(args, dir)
+		args, err = asConsoleUser(args, dir, file)
 		if err != nil {
 			return nil, err
 		}
@@ -139,12 +147,16 @@ func Run(ctx context.Context, req Request) (*Output, error) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	out := &Output{}
+	stopped := false // the context killed the process before it finished
 	select {
 	case err = <-done:
 	case <-ctx.Done():
 		killTree(cmd)
 		err = <-done
-		out.TimedOut = true
+		stopped = true
+		// A deadline is the task's own timeout; a plain cancel is the agent shutting
+		// down. Only the first should be reported to the server as a timeout.
+		out.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 	}
 	out.Stdout, out.Stderr = stdout.String(), stderr.String()
 	var exitErr *exec.ExitError
@@ -152,6 +164,9 @@ func Run(ctx context.Context, req Request) (*Output, error) {
 	case out.TimedOut:
 		out.ExitCode = -1
 		out.Stderr += fmt.Sprintf("\nStopped after %s.", timeout)
+	case stopped:
+		out.ExitCode = -1
+		out.Stderr += "\nStopped before it finished."
 	case errors.As(err, &exitErr):
 		out.ExitCode = exitErr.ExitCode()
 	case err != nil:

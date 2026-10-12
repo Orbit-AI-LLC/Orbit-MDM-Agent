@@ -174,9 +174,13 @@ func copySelf() (string, error) {
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
+		os.Remove(tmp)
 		return "", err
 	}
-	out.Close()
+	if err := out.Close(); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
 	return target, os.Rename(tmp, target)
 }
 

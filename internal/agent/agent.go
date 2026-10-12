@@ -150,7 +150,7 @@ func (a *Agent) Run(ctx context.Context) error {
 // once (internal/pulse). It needs the server's address, learned from a
 // check-in; without one it does nothing.
 func (a *Agent) pulse(ctx context.Context) {
-	for a.Config.PulseAddr == "" {
+	for a.Config.GetPulseAddr() == "" {
 		select {
 		case <-ctx.Done():
 			return
@@ -179,7 +179,7 @@ func (a *Agent) pulse(ctx context.Context) {
 		return
 	}
 	pulse.Maintain(ctx, pulse.Options{
-		Addr: a.Config.PulseAddr, AgentID: a.Config.AgentID,
+		Addr: a.Config.GetPulseAddr(), AgentID: a.Config.AgentID,
 		ServerKey: ed25519.PublicKey(serverKey), Signer: signer,
 		OnNudge: a.wake, Logger: a.Log,
 	})
@@ -195,11 +195,7 @@ func (a *Agent) wake() {
 // rememberPulseAddr saves the pulse address the server sent, if it changed, so a
 // restart picks it up (the pulse loop reads it once at start).
 func (a *Agent) rememberPulseAddr(addr string) {
-	if addr == a.Config.PulseAddr {
-		return
-	}
-	a.Config.PulseAddr = addr
-	if err := a.Config.Save(); err != nil {
+	if _, err := a.Config.SetPulseAddr(addr); err != nil {
 		a.Log.Printf("pulse: couldn't save the address: %v", err)
 	}
 }
@@ -207,11 +203,10 @@ func (a *Agent) rememberPulseAddr(addr string) {
 // applySupport remembers a help-desk contact the server sent, saving it so the
 // tray still has it after a restart, before the first check-in.
 func (a *Agent) applySupport(s *status.Support) {
-	if s == nil || *s == a.Config.Support {
+	if s == nil {
 		return
 	}
-	a.Config.Support = *s
-	if err := a.Config.Save(); err != nil {
+	if _, err := a.Config.SetSupport(*s); err != nil {
 		a.Log.Printf("couldn't save the help-desk contact: %v", err)
 	}
 }
@@ -233,7 +228,7 @@ func (a *Agent) writeStatus(ok bool, m map[string]any) {
 		Device:        a.Config.Device,
 		LastCheckin:   a.lastGoodCheckin,
 		LastCheckinOK: ok,
-		Support:       a.Config.Support,
+		Support:       a.Config.GetSupport(),
 		UpdatedAt:     now,
 	}
 	if perms, _ := m["permissions"].(map[string]string); len(perms) > 0 {
@@ -325,8 +320,14 @@ func (a *Agent) worker(ctx context.Context) {
 // run records the task as seen (so it can never run twice), runs it,
 // reports the result, and only then does anything that ends this process.
 func (a *Agent) run(ctx context.Context, task *tasks.Task) {
-	if err := a.Seen.Add(task.ID, time.Now()); err != nil {
+	added, err := a.Seen.Add(task.ID, time.Now())
+	if err != nil {
 		a.Log.Printf("could not record task %s: %v", task.ID, err)
+		return
+	}
+	if !added {
+		// A duplicate of this task reached the queue (the server keeps returning a
+		// task until it's started); the first copy already claimed it. Never twice.
 		return
 	}
 	_ = a.Client.Start(ctx, task.ID)

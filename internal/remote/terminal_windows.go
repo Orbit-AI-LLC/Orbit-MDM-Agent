@@ -136,11 +136,17 @@ func (t *winTerminal) Wait() int {
 
 func (t *winTerminal) Close() error {
 	t.once.Do(func() {
-		// Closing the console ends the shell; then free everything.
+		// Closing the console ends the shell; TerminateProcess makes sure a wedged
+		// one still exits. Both are valid on the live handle while the monitor
+		// goroutine reads it. Wait for that goroutine (<-t.done) to finish reading
+		// the exit code before closing the process handle, so the handle is never
+		// closed out from under a WaitForSingleObject/GetExitCodeProcess still in
+		// flight (a use-after-close that could land on a reused handle).
 		windows.ClosePseudoConsole(t.console)
+		windows.TerminateProcess(t.process, 1)
+		<-t.done
 		_ = t.in.Close()
 		_ = t.out.Close()
-		windows.TerminateProcess(t.process, 1)
 		windows.CloseHandle(t.thread)
 		windows.CloseHandle(t.process)
 	})

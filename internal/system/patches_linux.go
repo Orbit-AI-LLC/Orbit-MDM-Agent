@@ -4,6 +4,7 @@ package system
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,8 +29,15 @@ func ScanUpdates(ctx context.Context) ([]Update, error) {
 		return AptUpgrades(string(out)), nil
 	case has("dnf"):
 		security := DnfSecurity(run(ctx, 5*time.Minute, "dnf", "-q", "updateinfo", "list", "--security"))
-		// check-update exits 100 when there are updates.
-		out, _ := exec.CommandContext(ctx, "dnf", "-q", "check-update").Output()
+		// check-update exits 0 when up to date and 100 when updates are waiting;
+		// any other failure must be surfaced, not reported as "fully patched".
+		out, err := exec.CommandContext(ctx, "dnf", "-q", "check-update").Output()
+		if err != nil {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 100 {
+				return nil, fmt.Errorf("dnf check-update failed: %w", err)
+			}
+		}
 		return DnfUpdates(string(out), security), nil
 	case has("zypper"):
 		out, err := exec.CommandContext(ctx, "zypper", "-q", "-n", "list-updates").Output()

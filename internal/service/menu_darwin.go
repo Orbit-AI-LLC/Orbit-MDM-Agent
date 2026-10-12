@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"syscall"
 )
 
@@ -196,9 +197,15 @@ func writeIcon(path string) error {
 // under installd, not this process, so the install finishes even when the
 // package's postinstall reloads — and so replaces — this very daemon. It cleans
 // up the package's temp directory when it's done.
+// shellQuote wraps s so /bin/sh treats it as one literal argument, even if the
+// path contains spaces or shell metacharacters.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func InstallPackage(pkg string) error {
-	script := fmt.Sprintf(`/usr/sbin/installer -pkg %q -target / >>/var/log/orbit-agent-install.log 2>&1; /bin/rm -rf %q`,
-		pkg, filepath.Dir(pkg))
+	script := fmt.Sprintf(`/usr/sbin/installer -pkg %s -target / >>/var/log/orbit-agent-install.log 2>&1; /bin/rm -rf %s`,
+		shellQuote(pkg), shellQuote(filepath.Dir(pkg)))
 	cmd := exec.Command("/bin/sh", "-c", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	return cmd.Start()

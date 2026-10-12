@@ -5,6 +5,7 @@ package system
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -54,7 +55,12 @@ func ScanUpdates(ctx context.Context) ([]Update, error) {
 		SizeMB   float64 `json:"size_mb"`
 		Reboot   bool    `json:"reboot"`
 	}
-	text := run(ctx, 15*time.Minute, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", scanScript)
+	text, err := runErr(ctx, 15*time.Minute, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", scanScript)
+	if err != nil {
+		// A failed scan must not look like "nothing to install"; surface it so the
+		// server shows an error instead of reporting the computer as fully patched.
+		return nil, fmt.Errorf("the Windows Update scan failed: %w", err)
+	}
 	if strings.HasPrefix(text, "{") {
 		text = "[" + text + "]"
 	}

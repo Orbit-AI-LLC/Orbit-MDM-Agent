@@ -23,13 +23,27 @@ func killTree(cmd *exec.Cmd) {
 	}
 }
 
-// asConsoleUser runs the script as whoever is signed in at the screen.
-func asConsoleUser(args []string, dir string) ([]string, error) {
+// runAsTempBase is the directory a RunAs="user" script's temp folder is made in.
+// /tmp is world-traversable (sticky) on macOS and Linux, so the signed-in user
+// can reach their own folder once it's handed to them (see asConsoleUser),
+// unlike the agent's default temp root, which can be private to root.
+func runAsTempBase() string { return "/tmp" }
+
+// asConsoleUser runs the script as whoever is signed in at the screen. The agent
+// runs as root and wrote the script, so it hands the script's folder and the
+// script itself to that user; otherwise the interpreter, running as them, can't
+// read it.
+func asConsoleUser(args []string, dir, file string) ([]string, error) {
 	user, uid := consoleUser()
 	if user == "" || user == "root" {
 		return nil, errors.New("nobody is signed in at this computer")
 	}
-	_ = os.Chmod(dir, 0o755)
+	if n, err := strconv.Atoi(uid); err == nil {
+		_ = os.Chown(dir, n, -1)
+		_ = os.Chown(file, n, -1)
+	}
+	_ = os.Chmod(dir, 0o700)
+	_ = os.Chmod(file, 0o600)
 	if runtime.GOOS == "darwin" {
 		return append([]string{"launchctl", "asuser", uid, "sudo", "-u", user, "--"}, args...), nil
 	}

@@ -31,6 +31,12 @@ func notifyViewing(by string) {
 	if err != nil {
 		return
 	}
-	script := `display notification "` + who + ` connected to this screen through Orbit RMM." with title "Orbit RMM" sound name "Submarine"`
-	_ = exec.Command("launchctl", "asuser", uid, "sudo", "-u", strings.TrimSpace(string(name)), "osascript", "-e", script).Start()
+	// who comes from the signed task; escape it so a quote or backslash in the
+	// admin's name can't break (or inject into) the AppleScript.
+	esc := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(who)
+	script := `display notification "` + esc + ` connected to this screen through Orbit RMM." with title "Orbit RMM" sound name "Submarine"`
+	cmd := exec.Command("launchctl", "asuser", uid, "sudo", "-u", strings.TrimSpace(string(name)), "osascript", "-e", script)
+	if cmd.Start() == nil {
+		go func() { _ = cmd.Wait() }() // reap the helper so it doesn't linger as a zombie
+	}
 }

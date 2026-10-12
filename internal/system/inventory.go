@@ -46,13 +46,20 @@ func Network() []map[string]any {
 }
 
 func run(ctx context.Context, timeout time.Duration, name string, args ...string) string {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).Output()
+	out, err := runErr(ctx, timeout, name, args...)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return out
+}
+
+// runErr is run but keeps the command's error, so a caller can tell a failed
+// command apart from one that succeeded with no output.
+func runErr(ctx context.Context, timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // signedInUsers lists who is signed in, from `who` on macOS and Linux.

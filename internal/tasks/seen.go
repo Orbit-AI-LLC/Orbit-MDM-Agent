@@ -35,10 +35,17 @@ func (s *Seen) Has(id string) bool {
 	return ok
 }
 
-// Add records a task as run, before it runs, and saves the record.
-func (s *Seen) Add(id string, now time.Time) error {
+// Add reserves a task as run, before it runs, and saves the record. It reports
+// whether the id was newly recorded: a false means the task was already seen (or
+// already claimed by another copy still in flight), so the caller must not run
+// it. The check and the record happen under one lock, so two copies of the same
+// task that both passed Has can never both be admitted.
+func (s *Seen) Add(id string, now time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.ids[id]; ok {
+		return false, nil
+	}
 	s.ids[id] = now.Unix()
 	cutoff := now.Add(-keep).Unix()
 	for k, at := range s.ids {
@@ -47,18 +54,18 @@ func (s *Seen) Add(id string, now time.Time) error {
 		}
 	}
 	if s.path == "" {
-		return nil
+		return true, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return err
+		return true, err
 	}
 	data, err := json.Marshal(s.ids)
 	if err != nil {
-		return err
+		return true, err
 	}
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
+		return true, err
 	}
-	return os.Rename(tmp, s.path)
+	return true, os.Rename(tmp, s.path)
 }

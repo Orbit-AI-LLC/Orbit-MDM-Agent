@@ -26,10 +26,15 @@ func Install(binary string) error {
 	defer m.Disconnect()
 	if existing, err := m.OpenService(Name); err == nil {
 		_, _ = existing.Control(svc.Stop)
-		time.Sleep(2 * time.Second)
+		// The agent's own stop handler waits up to 20s to shut down cleanly; wait for
+		// it to actually report stopped before deleting, or Delete marks a still-
+		// running service and CreateService then fails as "marked for delete".
+		waitStopped(existing, 25*time.Second)
 		_ = existing.Delete()
 		existing.Close()
-		time.Sleep(2 * time.Second)
+		// Delete only takes effect once the last handle closes; wait until the name
+		// is really gone before recreating it.
+		waitGone(m, Name, 10*time.Second)
 	}
 	s, err := m.CreateService(Name, binary, mgr.Config{
 		DisplayName: "Orbit RMM agent",
@@ -46,6 +51,32 @@ func Install(binary string) error {
 		{Type: mgr.ServiceRestart, Delay: 60 * time.Second},
 	}, 86400)
 	return s.Start()
+}
+
+// waitStopped waits until the service reports stopped (or the deadline passes).
+func waitStopped(s *mgr.Service, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		st, err := s.Query()
+		if err != nil || st.State == svc.Stopped {
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// waitGone waits until no service by this name can be opened (or the deadline
+// passes), so a recreate doesn't collide with a pending delete.
+func waitGone(m *mgr.Mgr, name string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		s, err := m.OpenService(name)
+		if err != nil {
+			return
+		}
+		s.Close()
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 // Uninstall stops the service and removes it.
@@ -77,6 +108,7 @@ type handler struct {
 func (h handler) Execute(args []string, requests <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
 	status <- svc.Status{State: svc.StartPending}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // also covers the path where run() returns on its own
 	done := make(chan struct{})
 	go func() {
 		h.run(ctx)

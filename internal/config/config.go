@@ -14,12 +14,17 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/Orbit-AI-LLC/Orbit-MDM-Agent/internal/status"
 )
 
 // Config is the agent's enrollment.
 type Config struct {
+	// mu guards the fields the server can change after start (PulseAddr, PulseSeed,
+	// Support) and serialises Save, which the main loop and the pulse goroutine both
+	// call. It is unexported, so encoding/json ignores it.
+	mu sync.Mutex
 	Server         string `json:"server"`
 	AgentID        string `json:"agent_id"`
 	Secret         string `json:"secret"`
@@ -119,6 +124,8 @@ func StatusPath() string { return filepath.Join(PublicDir(), "status.json") }
 // PulseKey returns this agent's Ed25519 key for the pulse channel, making and
 // saving one on first use. The caller registers the public half with the server.
 func (c *Config) PulseKey() (ed25519.PrivateKey, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.PulseSeed != "" {
 		if seed, err := base64.StdEncoding.DecodeString(c.PulseSeed); err == nil && len(seed) == ed25519.SeedSize {
 			return ed25519.NewKeyFromSeed(seed), nil
@@ -129,10 +136,46 @@ func (c *Config) PulseKey() (ed25519.PrivateKey, error) {
 		return nil, err
 	}
 	c.PulseSeed = base64.StdEncoding.EncodeToString(priv.Seed())
-	if err := c.Save(); err != nil {
+	if err := c.save(); err != nil {
 		return nil, err
 	}
 	return priv, nil
+}
+
+// GetPulseAddr returns the pulse address under the lock.
+func (c *Config) GetPulseAddr() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.PulseAddr
+}
+
+// SetPulseAddr saves the pulse address if it changed, reporting whether it did.
+func (c *Config) SetPulseAddr(addr string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if addr == c.PulseAddr {
+		return false, nil
+	}
+	c.PulseAddr = addr
+	return true, c.save()
+}
+
+// GetSupport returns the help-desk contact under the lock.
+func (c *Config) GetSupport() status.Support {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Support
+}
+
+// SetSupport saves the help-desk contact if it changed, reporting whether it did.
+func (c *Config) SetSupport(s status.Support) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if s == c.Support {
+		return false, nil
+	}
+	c.Support = s
+	return true, c.save()
 }
 
 // Load reads the configuration.
@@ -159,6 +202,15 @@ func Load() (*Config, error) {
 
 // Save writes the configuration, readable by its owner alone.
 func (c *Config) Save() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.save()
+}
+
+// save writes the configuration; the caller must hold c.mu. It writes to a
+// uniquely named temporary file before renaming so two concurrent saves can't
+// clobber each other's half-written file.
+func (c *Config) save() error {
 	if err := os.MkdirAll(Dir(), 0o700); err != nil {
 		return err
 	}
@@ -166,9 +218,23 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
-	tmp := Path() + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	tmp, err := os.CreateTemp(Dir(), "config-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, Path())
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, Path()); err != nil {
+		os.Remove(name)
+		return err
+	}
+	return nil
 }
