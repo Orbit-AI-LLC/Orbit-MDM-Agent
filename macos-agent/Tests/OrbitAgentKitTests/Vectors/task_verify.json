@@ -1,0 +1,44 @@
+{
+  "agent_id": "11111111-2222-3333-4444-555555555555",
+  "expired": {
+    "expect_error": "expired",
+    "sealed": {
+      "envelope": "eyJhZ2VudCI6IjExMTExMTExLTIyMjItMzMzMy00NDQ0LTU1NTU1NTU1NTU1NSIsImV4cGlyZXMiOjE2MDAwMDA2MDAsImlkIjoiOTk5OTk5OTktODg4OC03Nzc3LTY2NjYtNTU1NTU1NTU1NTU1IiwiaXNzdWVkIjoxNjAwMDAwMDAwLCJraW5kIjoibG9jayIsInBheWxvYWQiOm51bGx9",
+      "id": "99999999-8888-7777-6666-555555555555",
+      "signature": "pDPfsIx4HlqRc+Lakhf36FfSFbJW4NuOWqOzojAXGoFndN9BSUlfe5eUJz52brAZ33IX8pzPY0jyLMAYKjw7AQ=="
+    }
+  },
+  "good": {
+    "expect": {
+      "agent": "11111111-2222-3333-4444-555555555555",
+      "expires": 1700000600,
+      "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      "issued": 1700000000,
+      "kind": "script"
+    },
+    "sealed": {
+      "envelope": "eyJhZ2VudCI6IjExMTExMTExLTIyMjItMzMzMy00NDQ0LTU1NTU1NTU1NTU1NSIsImV4cGlyZXMiOjE3MDAwMDA2MDAsImlkIjoiYWFhYWFhYWEtYmJiYi1jY2NjLWRkZGQtZWVlZWVlZWVlZWVlIiwiaXNzdWVkIjoxNzAwMDAwMDAwLCJraW5kIjoic2NyaXB0IiwicGF5bG9hZCI6eyJib2R5IjoiZWNobyBoZWxsbyIsInJ1bl9hcyI6InJvb3QiLCJzaGVsbCI6InpzaCIsInRpbWVvdXQiOjMwfX0=",
+      "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      "signature": "Tp/NpZEOpPr8V6t4/N+DCZB7UOuBaXi4+UqHlRlZ5PLKsJKBac5KuqGOdwMJAGj1NvGTtLQ1D6TQuOC3uuLHDQ=="
+    }
+  },
+  "not_for_us": {
+    "expect_error": "notForUs",
+    "sealed": {
+      "envelope": "eyJhZ2VudCI6InNvbWVvbmUtZWxzZSIsImV4cGlyZXMiOjAsImlkIjoiZmZmZmZmZmYtMDAwMC0xMTExLTIyMjItMzMzMzMzMzMzMzMzIiwiaXNzdWVkIjoxNzAwMDAwMDAwLCJraW5kIjoicmVib290IiwicGF5bG9hZCI6bnVsbH0=",
+      "id": "ffffffff-0000-1111-2222-333333333333",
+      "signature": "HNN1x10K0XYbzzQa46taNtnNgyfDe0oAnxtGkZsLzCGTrlTC86ThpAuNV7dXUn3btCTaWyc87hN39Z505gQGAg=="
+    }
+  },
+  "note": "Ed25519 verify-then-parse vectors for internal/tasks/open.go and the Swift Tasks.open. Verify the received envelope bytes, then parse THOSE bytes.",
+  "now_unix": 1700000300,
+  "server_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+  "tampered": {
+    "expect_error": "signature",
+    "sealed": {
+      "envelope": "eyJhZ2VudCI6IjExMTExMTExLTIyMjItMzMzMy00NDQ0LTU1NTU1NTU1NTU1NSIsImV4cGlyZXMiOjE3MDAwMDA2MDAsImlkIjoiYWFhYWFhYWEtYmJiYi1jY2NjLWRkZGQtZWVlZWVlZWVlZWVlIiwiaXNzdWVkIjoxNzAwMDAwMDAwLCJraW5kIjoic2NyaXB0IiwicGF5bG9hZCI6eyJib2R5IjoiZWNobyBoZWxsbyIsInJ1bl9hcyI6InJvb3QiLCJzaGVsbCI6InpzaCIsInRpbWVvdXQiOjMwfX0=",
+      "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      "signature": "T5/NpZEOpPr8V6t4/N+DCZB7UOuBaXi4+UqHlRlZ5PLKsJKBac5KuqGOdwMJAGj1NvGTtLQ1D6TQuOC3uuLHDQ=="
+    }
+  }
+}

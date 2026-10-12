@@ -30,9 +30,10 @@ const iconName = "OrbitAgent"
 // config.BinaryPath, kept in step), so macOS lists it as "Orbit Agent" with the
 // Orbit logo in Full Disk Access, Screen Recording and Accessibility rather than
 // as a bare Unix tool. It has its own name so it never collides on disk with the
-// menu-bar bundle below, which already owns "Orbit Agent.app". InstallServiceBundle
-// writes the bundle's metadata; copySelf (cmd/orbit-agent) places the binary and
-// the .pkg lays the whole bundle down for fresh installs.
+// menu-bar bundle below, which already owns "Orbit Agent.app". The .pkg lays the
+// whole signed bundle down for installs and updates; copySelf (cmd/orbit-agent)
+// places the binary, and InstallServiceBundle writes the metadata only when no
+// bundle is there yet (a legacy bare-binary agent migrating in).
 const serviceAppPath = "/Library/Orbit/Orbit Agent Service.app"
 const serviceExecPath = serviceAppPath + "/Contents/MacOS/orbit-agent"
 const serviceInfoPath = serviceAppPath + "/Contents/Info.plist"
@@ -74,9 +75,12 @@ func menuInfoPlist(version string) string {
 `, menuLabel, iconName, version, version)
 }
 
-// serviceInfoPlist is the Info.plist for the root service's .app bundle; it
-// mirrors packaging/macos/ServiceInfo.plist (%s is the version), so keep them in
-// step. CFBundleExecutable must match the binary copySelf places (orbit-agent),
+// serviceInfoPlist is the Info.plist InstallServiceBundle writes when it builds a
+// bundle for a legacy bare-binary agent; the signed .pkg ships
+// packaging/macos/ServiceInfo.plist instead, and that copy — not this one — is
+// what gets code-signed, so the two no longer need to match byte for byte. They
+// should still describe the same bundle: CFBundleExecutable must match the binary
+// copySelf places (orbit-agent),
 // and CFBundleIdentifier must stay ai.orbit.agent, the identifier the PPPC
 // profile's code requirement and permissions_darwin.go's TCC lookup key on.
 // LSBackgroundOnly: it's a launchd daemon, not an app someone opens.
@@ -159,21 +163,34 @@ func InstallMenuApp(binaryPath, version string) error {
 	return nil
 }
 
-// InstallServiceBundle writes the root service's .app bundle metadata — its
-// Info.plist and icon — around the binary copySelf has placed inside it, and
-// removes the bare binary a pre-bundle install left in /Library/Orbit. The
-// service's launchd plist (service_unix.go) and the binary itself are written
-// elsewhere; this only gives the bundle the name and logo macOS shows in the
-// privacy panes. Safe to run on every install: it just rewrites the metadata.
+// InstallServiceBundle gives the root service's .app bundle its metadata — its
+// Info.plist and icon — around the binary copySelf has placed inside it, so the
+// privacy panes show "Orbit Agent" with the Orbit logo. It writes them only when
+// the bundle isn't already there, and removes the bare binary a pre-bundle
+// install left in /Library/Orbit.
+//
+// It must not touch an existing bundle. The signed .pkg lays the whole bundle
+// down — Info.plist, icon and binary — for both fresh installs and updates, and
+// its code signature seals those files; rewriting even one of them changes its
+// bytes and breaks the seal, after which `codesign --verify` fails and macOS
+// stops honouring the TCC privacy grants the PPPC profile ties to the bundle's
+// code requirement (so Full Disk Access and the rest silently stop working). So
+// we build the metadata ourselves only when there's no bundle yet — a legacy
+// agent that enrolled as a bare binary, before the bundle existed, migrating
+// into one — where there is no signature to protect.
 func InstallServiceBundle(version string) error {
-	if err := os.MkdirAll(filepath.Dir(serviceInfoPath), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(serviceInfoPath, []byte(serviceInfoPlist(version)), 0o644); err != nil {
-		return err
-	}
-	if err := writeIcon(serviceIconPath); err != nil {
-		return err
+	// Only lay the metadata down when it's missing; never overwrite the signed
+	// bundle the .pkg installed.
+	if _, err := os.Stat(serviceInfoPath); err != nil {
+		if err := os.MkdirAll(filepath.Dir(serviceInfoPath), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(serviceInfoPath, []byte(serviceInfoPlist(version)), 0o644); err != nil {
+			return err
+		}
+		if err := writeIcon(serviceIconPath); err != nil {
+			return err
+		}
 	}
 	// An upgrade from a pre-bundle agent leaves the old bare binary beside the
 	// bundle; drop it so it isn't mistaken for the live one.
