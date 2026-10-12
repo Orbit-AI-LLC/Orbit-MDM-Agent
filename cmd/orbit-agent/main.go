@@ -146,7 +146,29 @@ func startService(noService bool) error {
 		return fmt.Errorf("couldn't install the service: %w", err)
 	}
 	fmt.Println("The Orbit agent is running.")
+	noticeMissingPermissions()
 	return nil
+}
+
+// noticeMissingPermissions prints, after an install or update, which macOS privacy
+// permissions the agent still needs, so someone installing from a terminal is told
+// to turn them on — macOS never prompts for Full Disk Access at all, and can't
+// prompt the root service for Screen Recording. Whoever is signed in gets the same
+// prompt from the menu-bar app (a notification that opens the right Settings pane).
+// A no-op off macOS, where the agent already has the access it needs.
+func noticeMissingPermissions() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	perms := system.Permissions(ctx)
+	if perms["full_disk_access"] != "granted" {
+		fmt.Println("  Needs Full Disk Access: System Settings → Privacy & Security → Full Disk Access → turn on Orbit Agent (macOS never prompts for this one).")
+	}
+	if perms["screen_recording"] == "denied" {
+		fmt.Println("  Needs Screen Recording for remote support: System Settings → Privacy & Security → Screen Recording → turn on Orbit Agent.")
+	}
 }
 
 // copySelf puts this binary where the service runs it from.

@@ -68,11 +68,12 @@ func readStatus() -> Status? {
 
 // MARK: - The app
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSUserNotificationCenterDelegate {
     private var item: NSStatusItem!
     private var timer: Timer?
-    // When each Settings pane was last opened for a missing permission, so the
-    // nudge below doesn't reopen it on every wake (see requestMissingPermissions).
+    // When each missing permission was last surfaced (notified, and at launch taken
+    // to Settings), so the nudge below doesn't repeat on every wake (see
+    // requestMissingPermissions).
     private var lastAsked: [String: Date] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -80,12 +81,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
+        // Deliver our permission notifications even while this app is frontmost, and
+        // open the right Settings pane when the person acts on one (see notify).
+        NSUserNotificationCenter.default.delegate = self
         refreshIcon()
         // Keep the icon's health colour current even while the menu is closed.
         timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.refreshIcon() }
         // At launch (so each login, and each self-update, which reloads the app)
-        // ask for whatever is still missing.
-        requestMissingPermissions()
+        // prompt for whatever is still missing.
+        requestMissingPermissions(launching: true)
         // Do the same the moment the Mac wakes or someone signs in, and refresh so a
         // permission the service is re-asking for (internal/agent watchPermissions)
         // shows as resolved without waiting for the next tick.
@@ -99,35 +103,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: NSNotification.Name("AppleInterfaceThemeChangedNotification"), object: nil)
     }
 
-    // wakeOrLogin refreshes the icon and re-asks for any missing permission when the
-    // Mac wakes or someone signs in.
+    // wakeOrLogin refreshes the icon and re-prompts for any missing permission when
+    // the Mac wakes or someone signs in.
     @objc private func wakeOrLogin() {
         refreshIcon()
-        requestMissingPermissions()
+        requestMissingPermissions(launching: false)
     }
 
-    // requestMissingPermissions takes the person to the right System Settings pane
-    // for each permission that's still denied. macOS only raises an on-screen prompt
-    // for a foreground app in the signed-in user's session, never for the root
-    // service — so for both Full Disk Access (which has no prompt at all) and Screen
-    // Recording (whose prompt the daemon can't trigger) the reliable way to ask is
-    // to open the pane for the person to switch Orbit Agent on. Accessibility is left
-    // out until the remote-control feature that needs it ships. To avoid reopening
-    // Settings on every wake, each pane is opened at most once an hour, and never
-    // once the permission is granted.
-    private func requestMissingPermissions() {
+    // requestMissingPermissions prompts the person to grant each permission that's
+    // still denied. macOS only raises its own on-screen prompt for a foreground app
+    // in the signed-in user's session, never for the root service — so for both Full
+    // Disk Access (which has no prompt at all) and Screen Recording (whose prompt the
+    // daemon can't trigger) this app surfaces it instead: it posts a notification
+    // explaining what's needed, which opens the right System Settings pane when
+    // clicked (see notify), and at a fresh launch — an install, a self-update or a
+    // login — also takes the person straight there, so even with notifications turned
+    // off for the app the install/update prompt isn't missed. Accessibility is left
+    // out until the remote-control feature that needs it ships. To avoid nagging,
+    // each permission is surfaced at most once an hour, and never once it's granted.
+    private func requestMissingPermissions(launching: Bool) {
         guard let perms = readStatus()?.permissions else { return }
-        // Permission → the Settings pane to open for it.
-        let settingsOnly = [
-            "full_disk_access": "open_full_disk_access",
-            "screen_recording": "open_screen_recording",
+        // Permission → the Settings pane for it, and how to prompt for it.
+        let prompts: [(permission: String, fix: String, title: String, body: String)] = [
+            ("full_disk_access", "open_full_disk_access", "Orbit agent needs Full Disk Access",
+             "Turn on Orbit Agent in System Settings so it can complete inventory and management. macOS never prompts for this one."),
+            ("screen_recording", "open_screen_recording", "Orbit agent needs Screen Recording",
+             "Remote support can't see this screen until you turn on Screen Recording for Orbit Agent."),
         ]
-        for (permission, fix) in settingsOnly {
-            guard perms[permission] == "denied", let pane = settingsPane(for: fix) else { continue }
-            if let last = lastAsked[permission], Date().timeIntervalSince(last) < 3600 { continue }
-            lastAsked[permission] = Date()
-            if let url = URL(string: pane) { NSWorkspace.shared.open(url) }
+        for p in prompts {
+            guard perms[p.permission] == "denied", let pane = settingsPane(for: p.fix) else { continue }
+            if let last = lastAsked[p.permission], Date().timeIntervalSince(last) < 3600 { continue }
+            lastAsked[p.permission] = Date()
+            notify(title: p.title, body: p.body, pane: pane)
+            if launching, let url = URL(string: pane) { NSWorkspace.shared.open(url) }
         }
+    }
+
+    // notify posts a user notification prompting the person to grant a permission;
+    // clicking it (or its Open Settings button) opens the right privacy pane. This is
+    // how an install or update actively surfaces a missing permission, rather than it
+    // showing only as a colour in the menu bar. NSUserNotification is deprecated but
+    // needs no authorization prompt and works from an accessory app on macOS 12+.
+    private func notify(title: String, body: String, pane: String) {
+        let n = NSUserNotification()
+        n.title = title
+        n.informativeText = body
+        n.hasActionButton = true
+        n.actionButtonTitle = "Open Settings"
+        n.userInfo = ["pane": pane]
+        NSUserNotificationCenter.default.deliver(n)
+    }
+
+    // Show our notifications even when this menu-bar app is the active application.
+    func userNotificationCenter(_ center: NSUserNotificationCenter, shouldPresent notification: NSUserNotification) -> Bool { true }
+
+    // Open the Settings pane when the person clicks the notification or its button.
+    func userNotificationCenter(_ center: NSUserNotificationCenter, didActivate notification: NSUserNotification) {
+        guard let pane = notification.userInfo?["pane"] as? String, let url = URL(string: pane) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: Icon

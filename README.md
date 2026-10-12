@@ -144,11 +144,18 @@ the agent does too:
 only while someone is signed in) at the moments a fresh prompt can appear: at
 startup — which covers a self-update, since the service restarts into a new binary
 — and when it notices a new login or a wake from sleep. The menu-bar app does the
-same for the no-prompt permissions, opening the right Settings pane at most once an
-hour so it doesn't reopen on every wake, and refreshes so a permission just
-resolved shows as resolved at once. Nothing ever disturbs a permission that is
-already granted, and the menu-bar app's **Fix…** buttons are always there for a
-permission the person has explicitly denied (which macOS won't re-prompt for).
+same for the no-prompt permissions: when one is still denied it posts a
+notification saying what the agent needs, which opens the right Settings pane when
+clicked, and at a fresh launch — an install, a self-update or a login — it also
+takes the person straight to that pane, so the install/update prompt isn't missed
+even if notifications are turned off for the app. It surfaces each permission at
+most once an hour so it doesn't nag on every wake, and refreshes so a permission
+just resolved shows as resolved at once. The `orbit-agent install` command (what
+the `.pkg` runs, and what you run by hand) prints the same for whoever is at a
+terminal: after it starts the service it names any permission still off and the
+Settings path to turn it on. Nothing ever disturbs a permission that is already
+granted, and the menu-bar app's **Fix…** buttons are always there for a permission
+the person has explicitly denied (which macOS won't re-prompt for).
 
 **The grant survives an update only when the agent is signed with a stable
 identity.** TCC keys a *signed* app by its designated requirement — `identifier
