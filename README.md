@@ -142,11 +142,13 @@ the agent does too:
   without an MDM** — the person clicks the menu-bar app's **Fix…** and toggles it
   on. Reusing the service's `ai.orbit.agent` identity means a managed Mac's PPPC
   profile still grants it silently, with no second bundle to sign.
-- **Accessibility** also has a prompt, but the remote desktop is view-only today,
-  so the agent won't ask for a permission it wouldn't use yet. When remote control
-  (keyboard and mouse injection) lands it will run in the same user-session desktop
-  helper, which can raise the Accessibility prompt in the GUI session — so, like
-  Screen Recording, it is grantable without an MDM.
+- **Accessibility** drives remote keyboard and mouse control, which the desktop
+  helper injects with CoreGraphics (`internal/remote/input_darwin.go`, through
+  purego, so the agent still builds with no cgo). The helper runs in the GUI
+  session, so — like Screen Recording — it lists the agent under Accessibility and
+  the person turns it on without an MDM; the remote desktop is view-only until they
+  do (macOS silently drops the injected events). The menu-bar app's **Fix…** opens
+  the Accessibility pane.
 - **Full Disk Access** has *no prompt at all* — macOS never asks for it; a program
   just silently can't read protected paths. The only way to ask is to open its
   System Settings pane, which the menu-bar app does.

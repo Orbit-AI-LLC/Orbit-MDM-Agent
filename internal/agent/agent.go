@@ -268,7 +268,7 @@ func issues(ok bool, m map[string]any, perms map[string]string) []status.Issue {
 	if perms["accessibility"] == status.Denied {
 		out = append(out, status.Issue{ID: "accessibility", Severity: status.Info,
 			Title:  "Accessibility is off",
-			Detail: "Needed later for remote keyboard and mouse control.",
+			Detail: "Allow Accessibility for the Orbit agent to use remote keyboard and mouse control.",
 			Fix:    "open_accessibility"})
 	}
 	return out

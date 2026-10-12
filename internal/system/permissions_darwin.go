@@ -105,10 +105,10 @@ func ConsoleUser() string {
 //     asks. The agent takes a throwaway capture, which both lists it under Screen
 //     Recording and raises the one-time prompt whenever the decision is still open,
 //     including right after a self-update gave an unsigned build a fresh binary.
-//   - Accessibility (remote keyboard and mouse) also has a system prompt, but the
-//     agent doesn't use it yet (the remote desktop is view-only), so it isn't
-//     requested until the feature that needs it lands — asking for a permission the
-//     agent won't use would only confuse the person.
+//   - Accessibility (remote keyboard and mouse) is requested by the desktop helper
+//     in the GUI session (internal/remote, requestAccessibility), not here — like
+//     Screen Recording, it can only be granted to a process in the session, which
+//     is what lets it be turned on without an MDM.
 //   - Full Disk Access (complete inventory) has NO prompt at all: macOS never asks
 //     for it, a program just silently can't read protected paths. There's nothing
 //     to trigger here; the menu-bar app takes the person to the right System

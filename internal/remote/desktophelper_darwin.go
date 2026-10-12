@@ -56,10 +56,12 @@ func RunDesktopHelper(ctx context.Context, logger *log.Logger) error {
 	_ = os.Chmod(sock, 0o600)
 	logger.Printf("desktop helper listening on %s", sock)
 
-	// List the agent under Screen Recording and raise the one-time prompt while the
-	// decision is still open. Running here, in the GUI session, is what lets the
-	// person grant it without an MDM.
+	// List the agent under Screen Recording (the remote view) and Accessibility
+	// (remote keyboard and mouse) and raise their prompts while the decisions are
+	// still open. Running here, in the GUI session, is what lets the person grant
+	// them without an MDM.
 	provokeScreenRecording(ctx)
+	requestAccessibility()
 
 	go func() { <-ctx.Done(); ln.Close() }()
 

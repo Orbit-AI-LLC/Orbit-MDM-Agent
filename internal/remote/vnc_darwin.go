@@ -19,17 +19,24 @@ import (
 const macMaxDimension = 1440
 
 // macScreen captures the Mac's display with the built-in `screencapture` tool —
-// no third-party VNC server, no screen sharing to turn on. It needs the Screen
-// Recording permission, which an MDM can grant the agent with a PPPC profile.
+// no third-party VNC server, no screen sharing to turn on. It needs Screen
+// Recording; the person grants it in the GUI session (where the desktop helper
+// runs) or an MDM grants it by PPPC profile.
 //
-// Input (pointer and keyboard) is not injected yet, so the session is
-// view-only; control is the next step (it needs the CoreGraphics event bridge).
+// Pointer and keyboard input are injected with CoreGraphics (input_darwin.go,
+// via purego), which needs Accessibility — held by the same helper. Until
+// Accessibility is granted the posts are silently dropped, so the session is
+// effectively view-only until then.
 type macScreen struct {
-	w, h     int // the framebuffer size served to the client (downscaled)
-	srcW     int
-	srcH     int
-	tmp      string
-	captures sync.Mutex
+	w, h         int // the framebuffer size served to the client (downscaled)
+	srcW         int
+	srcH         int
+	pointW       float64 // the display's size in points, for mapping input
+	pointH       float64
+	mods         uint64 // current CGEvent modifier flags (shift/ctrl/alt/cmd)
+	lastButtons  uint8  // last RFB button mask, to emit mouse down/up/drag
+	tmp          string
+	captures     sync.Mutex
 }
 
 // newMacScreen captures one frame to learn the display size and lock the served
@@ -48,6 +55,12 @@ func newMacScreen() (*macScreen, error) {
 	b := img.Bounds()
 	s.srcW, s.srcH = b.Dx(), b.Dy()
 	s.w, s.h = fitWithin(s.srcW, s.srcH, macMaxDimension)
+	// The display's point size, for mapping input coordinates (CGEvent uses
+	// points, the capture is in pixels). Fall back to pixels on failure.
+	s.pointW, s.pointH = displayPoints()
+	if s.pointW <= 0 || s.pointH <= 0 {
+		s.pointW, s.pointH = float64(s.srcW), float64(s.srcH)
+	}
 	return s, nil
 }
 
@@ -84,9 +97,7 @@ func (s *macScreen) Frame() (int, int, []byte, error) {
 	return s.w, s.h, toBGRX(img, s.w, s.h), nil
 }
 
-// Input isn't injected yet: the session is view-only.
-func (s *macScreen) Pointer(int, int, uint8) {}
-func (s *macScreen) Key(uint32, bool)        {}
+// Pointer and Key are implemented in input_darwin.go (CoreGraphics via purego).
 
 func (s *macScreen) Close() {
 	if s.tmp != "" {
